@@ -14,7 +14,9 @@ defmodule GitWork.Commands.Checkout do
     Switch to a branch by navigating to its worktree directory.
 
     Without -b, matches an existing worktree (exact or fuzzy) and prints its
-    path. Returns an error if no matching worktree is found.
+    path. If no worktree matches but a remote branch with that exact name
+    exists, a new worktree is automatically created tracking the remote branch.
+    Returns an error only if neither a worktree nor a remote branch is found.
 
     With -b, creates a new worktree for the given branch (tracking the remote
     branch if one exists, or creating a new local branch otherwise). Returns
@@ -30,6 +32,7 @@ defmodule GitWork.Commands.Checkout do
     Examples:
       git-work checkout feature-login    # switch to existing worktree
       git-work checkout login            # fuzzy match existing worktree
+      git-work checkout feature/remote   # auto-create from remote branch
       git-work checkout -b feature/new   # create new worktree
     """
   end
@@ -68,7 +71,20 @@ defmodule GitWork.Commands.Checkout do
         {:error, "ambiguous match for '#{input}':\n#{formatted}"}
 
       :no_match ->
-        {:error, "no worktree found for '#{input}' (use -b to create one)"}
+        # No existing worktree — check if a remote branch matches
+        bare_dir = Project.bare_path(root)
+
+        case Git.cmd(["branch", "-r", "--list", "origin/#{input}"], cd: bare_dir) do
+          {:ok, ""} ->
+            {:error, "no worktree found for '#{input}' (use -b to create one)"}
+
+          {:ok, _} ->
+            IO.write(:stderr, "creating worktree from remote branch: '#{input}'\n")
+            create_worktree(root, input, sanitized)
+
+          {:error, _} ->
+            {:error, "no worktree found for '#{input}' (use -b to create one)"}
+        end
     end
   end
 

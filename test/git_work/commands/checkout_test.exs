@@ -108,4 +108,28 @@ defmodule GitWork.Commands.CheckoutTest do
     assert File.dir?(path)
     assert File.regular?(Path.join(path, "feature-remote.txt"))
   end
+
+  test "checkout without -b auto-creates worktree from remote branch", %{tmp: tmp} do
+    origin = GitWork.TestHelper.create_origin_repo(tmp)
+    project = Path.join(tmp, "project")
+    {:ok, _} = GitWork.Commands.Clone.run([origin, project])
+
+    # Create a branch on the remote
+    GitWork.TestHelper.create_remote_branch(origin, "feature-remote")
+
+    # Fetch so the project knows about it
+    System.cmd("git", ["fetch", "--all"], cd: Path.join(project, ".bare"))
+
+    File.cd!(Path.join(project, "main"))
+
+    # Checkout without -b should auto-create from remote
+    assert {:ok, path} = Checkout.run(["feature-remote"])
+    assert File.dir?(path)
+    assert path == Path.join(project, "feature-remote")
+    assert File.regular?(Path.join(path, "feature-remote.txt"))
+
+    # Verify git knows about the worktree
+    {output, 0} = System.cmd("git", ["worktree", "list"], cd: Path.join(project, ".bare"))
+    assert output =~ "feature-remote"
+  end
 end
