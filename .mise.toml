@@ -1,0 +1,32 @@
+[tools]
+erlang = "27.2"
+elixir = "1.18.3-otp-27"
+
+[tasks."release:build"]
+description = "Build a shippable tarball (cross-platform escript)"
+run = """
+set -euo pipefail
+
+VERSION=${VERSION:-}
+if [ -z "$VERSION" ]; then
+  if git describe --tags --abbrev=0 >/dev/null 2>&1; then
+    VERSION=$(git describe --tags --abbrev=0)
+  else
+    VERSION=0.0.0
+  fi
+fi
+VERSION=${VERSION#v}
+
+DIST=dist
+rm -rf "$DIST"
+mkdir -p "$DIST"
+
+MIX_ENV=prod mix escript.build
+
+cp git_work "$DIST/git-work"
+ASSET="git-work_${VERSION}.tar.gz"
+tar -czf "$DIST/$ASSET" -C "$DIST" git-work
+shasum -a 256 "$DIST/$ASSET" | awk '{print $1}' > "$DIST/$ASSET.sha256"
+
+echo "Built $DIST/$ASSET"
+"""
