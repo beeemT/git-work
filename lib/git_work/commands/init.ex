@@ -49,6 +49,7 @@ defmodule GitWork.Commands.Init do
              :ok <- configure_bare(bare_dir),
              :ok <- move_files_to_worktree(dir, branch),
              :ok <- setup_worktree_linkage(dir, branch),
+             :ok <- reset_worktree_index(dir, branch),
              :ok <- maybe_pop_stash(dir, branch, stashed?) do
           {:ok, Path.join(dir, branch)}
         else
@@ -163,6 +164,15 @@ defmodule GitWork.Commands.Init do
     case File.write(path, content) do
       :ok -> :ok
       {:error, reason} -> {:error, "failed to write '#{path}': #{reason}"}
+    end
+  end
+
+  defp reset_worktree_index(dir, branch) do
+    worktree_dir = Path.join(dir, branch)
+
+    case Git.cmd(["reset"], cd: worktree_dir) do
+      {:ok, _} -> :ok
+      {:error, msg} -> {:error, "failed to reset worktree index: #{msg}"}
     end
   end
 
