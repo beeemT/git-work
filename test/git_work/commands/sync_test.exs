@@ -27,7 +27,7 @@ defmodule GitWork.Commands.SyncTest do
 
     File.cd!(Path.join(project, "main"))
 
-    {:ok, _} = Checkout.run(["feature-stale"])
+    {:ok, _} = Checkout.run(["-b", "feature-stale"])
     assert File.dir?(Path.join(project, "feature-stale"))
 
     # Go back to main before deleting
@@ -52,7 +52,7 @@ defmodule GitWork.Commands.SyncTest do
 
     File.cd!(Path.join(project, "main"))
 
-    {:ok, _} = Checkout.run(["feature-dry"])
+    {:ok, _} = Checkout.run(["-b", "feature-dry"])
     File.cd!(Path.join(project, "main"))
 
     GitWork.TestHelper.delete_remote_branch(origin, "feature-dry")

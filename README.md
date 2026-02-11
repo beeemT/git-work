@@ -38,9 +38,9 @@ gw init
 **Switch branches:**
 
 ```bash
-gw checkout feature-login   # cd's into the worktree
-gw checkout feat             # fuzzy match -- works if unambiguous
-gw checkout new-feature      # no match? creates a new branch + worktree
+gw checkout feature-login   # switch to existing worktree
+gw checkout feat             # fuzzy match existing worktree
+gw checkout -b new-feature   # create new worktree for branch
 ```
 
 ## Shell Integration
@@ -63,7 +63,7 @@ Then use `gw` instead of `git-work` for seamless directory switching.
 |---|---|
 | `gw clone <url> [dir]` | Clone a repo into the worktree layout |
 | `gw init` | Convert the current repo in-place |
-| `gw checkout <branch>` | Switch to a branch (creates worktree if needed) |
+| `gw checkout [-b] <branch>` | Switch to a branch (use -b to create new worktree) |
 | `gw rm [--force] <branch>` | Remove a worktree and delete the branch |
 | `gw sync [--dry-run] [--force]` | Fetch and prune worktrees for deleted remote branches |
 | `gw list` | List all worktrees |
@@ -89,12 +89,18 @@ gw init
 
 ### `checkout <branch>`
 
-Switches to a worktree. If one doesn't exist yet, it creates it. Supports fuzzy matching -- a partial branch name works as long as it's unambiguous.
+Switches to an existing worktree. Supports fuzzy matching -- a partial branch name works as long as it's unambiguous.
 
 ```bash
 gw checkout main               # exact match
-gw checkout feat                # fuzzy: matches "feature-login"
-gw checkout new-feature         # no match: creates new branch + worktree
+gw checkout feat               # fuzzy: matches "feature-login"
+```
+
+To create a new worktree for a branch (existing or new), use `-b`:
+
+```bash
+gw checkout -b new-feature     # create new worktree + branch
+gw checkout -b feature-login   # create new worktree for existing branch
 ```
 
 If multiple branches match, git-work lists the candidates and exits with an error so you can be more specific.

@@ -107,6 +107,9 @@ mix escript.build
 - **`init` command** converts a normal repo in-place: moves `.git/` to
   `.bare/`, relocates working files into a branch subdir, wires up worktree
   linkage. Stashes uncommitted changes and restores after.
+- **Explicit Checkout**: `checkout` only switches to existing worktrees. Use
+  `-b` to create a new worktree. This mirrors git's behavior and prevents
+  accidental creation.
 - **`sync` command** runs `git fetch --all --prune` then removes worktrees
   whose remote tracking branch no longer exists. Never prunes HEAD branch.
   Supports `--dry-run` and `--force`.

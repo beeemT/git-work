@@ -29,12 +29,12 @@ defmodule GitWork.Commands.CheckoutTest do
     assert path == Path.join(project, "main")
   end
 
-  test "checkout creates worktree for new branch", %{tmp: tmp} do
+  test "checkout -b creates worktree for new branch", %{tmp: tmp} do
     project = GitWork.TestHelper.create_gw_project(tmp)
 
     File.cd!(Path.join(project, "main"))
 
-    assert {:ok, path} = Checkout.run(["feature-new"])
+    assert {:ok, path} = Checkout.run(["-b", "feature-new"])
     assert path == Path.join(project, "feature-new")
     assert File.dir?(path)
 
@@ -43,13 +43,32 @@ defmodule GitWork.Commands.CheckoutTest do
     assert output =~ "feature-new"
   end
 
+  test "checkout without -b errors on non-existent branch", %{tmp: tmp} do
+    project = GitWork.TestHelper.create_gw_project(tmp)
+
+    File.cd!(Path.join(project, "main"))
+
+    assert {:error, msg} = Checkout.run(["feature-new"])
+    assert msg =~ "no worktree found"
+    assert msg =~ "-b"
+  end
+
+  test "checkout -b errors when worktree already exists", %{tmp: tmp} do
+    project = GitWork.TestHelper.create_gw_project(tmp)
+
+    File.cd!(Path.join(project, "main"))
+
+    assert {:error, msg} = Checkout.run(["-b", "main"])
+    assert msg =~ "already exists"
+  end
+
   test "checkout fuzzy matches substring", %{tmp: tmp} do
     project = GitWork.TestHelper.create_gw_project(tmp)
 
     File.cd!(Path.join(project, "main"))
 
     # Create a feature branch worktree first
-    {:ok, _} = Checkout.run(["feature-login"])
+    {:ok, _} = Checkout.run(["-b", "feature-login"])
 
     # Now fuzzy match with substring
     assert {:ok, path} = Checkout.run(["login"])
@@ -62,8 +81,8 @@ defmodule GitWork.Commands.CheckoutTest do
     File.cd!(Path.join(project, "main"))
 
     # Create two feature branches
-    {:ok, _} = Checkout.run(["feature-login"])
-    {:ok, _} = Checkout.run(["feature-signup"])
+    {:ok, _} = Checkout.run(["-b", "feature-login"])
+    {:ok, _} = Checkout.run(["-b", "feature-signup"])
 
     # Ambiguous match
     assert {:error, msg} = Checkout.run(["feature"])
@@ -72,7 +91,7 @@ defmodule GitWork.Commands.CheckoutTest do
     assert msg =~ "feature-signup"
   end
 
-  test "checkout tracks remote branch", %{tmp: tmp} do
+  test "checkout -b tracks remote branch", %{tmp: tmp} do
     origin = GitWork.TestHelper.create_origin_repo(tmp)
     project = Path.join(tmp, "project")
     {:ok, _} = GitWork.Commands.Clone.run([origin, project])
@@ -85,7 +104,7 @@ defmodule GitWork.Commands.CheckoutTest do
 
     File.cd!(Path.join(project, "main"))
 
-    assert {:ok, path} = Checkout.run(["feature-remote"])
+    assert {:ok, path} = Checkout.run(["-b", "feature-remote"])
     assert File.dir?(path)
     assert File.regular?(Path.join(path, "feature-remote.txt"))
   end

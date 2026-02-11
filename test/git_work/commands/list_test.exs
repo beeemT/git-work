@@ -21,7 +21,7 @@ defmodule GitWork.Commands.ListTest do
 
     File.cd!(Path.join(project, "main"))
 
-    {:ok, _} = Checkout.run(["feature-list-test"])
+    {:ok, _} = Checkout.run(["-b", "feature-list-test"])
 
     assert {:ok, output} = List.run([])
     assert output =~ "main"

@@ -1,6 +1,6 @@
 defmodule GitWork.Commands.Checkout do
   @moduledoc """
-  Switch to a branch worktree. Creates the worktree if it doesn't exist.
+  Switch to a branch worktree, or create a new one with -b.
   Supports fuzzy matching against existing worktrees.
   """
 
@@ -9,12 +9,16 @@ defmodule GitWork.Commands.Checkout do
   def help do
     """
     usage: git-work checkout <branch>
+           git-work checkout -b <branch>
 
     Switch to a branch by navigating to its worktree directory.
 
-    If the worktree already exists, prints its path. If not, creates a new
-    worktree (tracking the remote branch if one exists, or creating a new
-    local branch otherwise).
+    Without -b, matches an existing worktree (exact or fuzzy) and prints its
+    path. Returns an error if no matching worktree is found.
+
+    With -b, creates a new worktree for the given branch (tracking the remote
+    branch if one exists, or creating a new local branch otherwise). Returns
+    an error if a worktree for that branch already exists.
 
     Supports fuzzy matching against existing worktrees:
       - Substring: 'login' matches 'feature-login'
@@ -24,21 +28,26 @@ defmodule GitWork.Commands.Checkout do
     Must be run from within a git-work project (any worktree or the root).
 
     Examples:
-      git-work checkout feature-login    # exact or create new
-      git-work checkout login            # fuzzy match
-      git-work checkout feature/new      # creates feature-new/ worktree
+      git-work checkout feature-login    # switch to existing worktree
+      git-work checkout login            # fuzzy match existing worktree
+      git-work checkout -b feature/new   # create new worktree
     """
   end
 
   def run(args) do
     case args do
+      ["-b", branch] ->
+        with {:ok, root} <- Project.find_root() do
+          do_create(root, branch)
+        end
+
       [branch] ->
         with {:ok, root} <- Project.find_root() do
           do_checkout(root, branch)
         end
 
       _ ->
-        {:error, "usage: git-work checkout <branch>"}
+        {:error, "usage: git-work checkout [-b] <branch>"}
     end
   end
 
@@ -46,7 +55,6 @@ defmodule GitWork.Commands.Checkout do
     existing = Project.worktree_dirs(root)
     sanitized = Project.sanitize_branch(input)
 
-    # First try exact match on sanitized name
     case Fuzzy.match(sanitized, existing) do
       {:exact, name} ->
         {:ok, Path.join(root, name)}
@@ -60,7 +68,18 @@ defmodule GitWork.Commands.Checkout do
         {:error, "ambiguous match for '#{input}':\n#{formatted}"}
 
       :no_match ->
-        create_worktree(root, input, sanitized)
+        {:error, "no worktree found for '#{input}' (use -b to create one)"}
+    end
+  end
+
+  defp do_create(root, input) do
+    existing = Project.worktree_dirs(root)
+    sanitized = Project.sanitize_branch(input)
+
+    if sanitized in existing do
+      {:error, "worktree '#{sanitized}' already exists"}
+    else
+      create_worktree(root, input, sanitized)
     end
   end
 

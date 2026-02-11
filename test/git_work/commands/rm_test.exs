@@ -26,7 +26,7 @@ defmodule GitWork.Commands.RmTest do
     File.cd!(Path.join(project, "main"))
 
     # Create a feature branch
-    {:ok, _} = Checkout.run(["feature-rm-test"])
+    {:ok, _} = Checkout.run(["-b", "feature-rm-test"])
     assert File.dir?(Path.join(project, "feature-rm-test"))
 
     # Remove it
@@ -62,7 +62,7 @@ defmodule GitWork.Commands.RmTest do
 
     File.cd!(Path.join(project, "main"))
 
-    {:ok, _} = Checkout.run(["feature-inside"])
+    {:ok, _} = Checkout.run(["-b", "feature-inside"])
 
     # cd into the feature worktree
     File.cd!(Path.join(project, "feature-inside"))
