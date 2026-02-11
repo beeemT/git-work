@@ -8,11 +8,15 @@ defmodule GitWork.CLI do
   @commands %{
     "activate" => Activate,
     "clone" => Clone,
+    "cl" => Clone,
     "init" => Init,
     "checkout" => Checkout,
+    "co" => Checkout,
     "rm" => Rm,
     "sync" => Sync,
-    "list" => List
+    "s" => Sync,
+    "list" => List,
+    "ls" => List
   }
 
   def run(args) do
@@ -89,12 +93,12 @@ defmodule GitWork.CLI do
 
     Commands:
       activate <shell>       Print shell integration (bash, zsh, fish)
-      clone <url> [<dir>]    Clone a repo into worktree-based layout
-      init                   Convert current repo to worktree-based layout
-      checkout <branch>      Switch to branch worktree (fuzzy match supported)
-      rm <branch>            Remove a worktree and its branch
-      sync [--dry-run]       Fetch and prune stale worktrees
-      list                   List all worktrees
+      clone (cl) <url> [<dir>]    Clone a repo into worktree-based layout
+      init                        Convert current repo to worktree-based layout
+      checkout (co) <branch>      Switch to branch worktree (fuzzy match supported)
+      rm <branch>                 Remove a worktree and its branch
+      sync (s) [--dry-run]        Fetch and prune stale worktrees
+      list (ls)                   List all worktrees
 
     Options:
       --help                 Show this help
