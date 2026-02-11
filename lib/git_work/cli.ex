@@ -49,7 +49,15 @@ defmodule GitWork.CLI do
         System.halt(1)
 
       module ->
-        handle_result(module.run(args))
+        result =
+          try do
+            module.run(args)
+          rescue
+            e ->
+              {:error, "unexpected error: #{Exception.message(e)}"}
+          end
+
+        handle_result(result)
     end
   end
 

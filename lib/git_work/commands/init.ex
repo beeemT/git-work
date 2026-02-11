@@ -3,7 +3,7 @@ defmodule GitWork.Commands.Init do
   Convert an existing normal git repository into the worktree-based layout.
   """
 
-  alias GitWork.{Git, Project}
+  alias GitWork.Git
 
   def help do
     """
@@ -118,46 +118,52 @@ defmodule GitWork.Commands.Init do
   defp move_files_to_worktree(dir, branch) do
     worktree_dir = Path.join(dir, branch)
 
-    case File.mkdir(worktree_dir) do
-      :ok ->
-        entries = File.ls!(dir)
+    with :ok <- File.mkdir(worktree_dir),
+         {:ok, entries} <- File.ls(dir) do
+      entries
+      |> Enum.reject(&(&1 in [".bare", ".git", branch]))
+      |> Enum.reduce_while(:ok, fn entry, :ok ->
+        src = Path.join(dir, entry)
+        dst = Path.join(worktree_dir, entry)
 
-        Enum.each(entries, fn entry ->
-          if entry not in [".bare", ".git", branch] do
-            src = Path.join(dir, entry)
-            dst = Path.join(worktree_dir, entry)
-            File.rename!(src, dst)
-          end
-        end)
-
-        :ok
-
+        case File.rename(src, dst) do
+          :ok -> {:cont, :ok}
+          {:error, reason} -> {:halt, {:error, "failed to move '#{entry}': #{reason}"}}
+        end
+      end)
+    else
       {:error, reason} ->
         {:error, "failed to create worktree directory: #{reason}"}
     end
   end
 
   defp setup_worktree_linkage(dir, branch) do
-    bare_dir = Project.bare_path(dir)
+    bare_dir = Path.join(dir, ".bare")
     worktree_dir = Path.join(dir, branch)
     worktree_meta = Path.join([bare_dir, "worktrees", branch])
 
-    # Create worktree metadata directory
-    File.mkdir_p!(worktree_meta)
+    with :ok <- mkdir_p(worktree_meta),
+         :ok <-
+           write_file(Path.join(worktree_meta, "gitdir"), Path.join(worktree_dir, ".git") <> "\n"),
+         :ok <- write_file(Path.join(worktree_meta, "commondir"), "../../\n"),
+         :ok <- write_file(Path.join(worktree_meta, "HEAD"), "ref: refs/heads/#{branch}\n"),
+         :ok <- write_file(Path.join(worktree_dir, ".git"), "gitdir: #{worktree_meta}\n") do
+      :ok
+    end
+  end
 
-    # Write the gitdir file pointing from bare to worktree
-    File.write!(Path.join(worktree_meta, "gitdir"), Path.join(worktree_dir, ".git") <> "\n")
+  defp mkdir_p(path) do
+    case File.mkdir_p(path) do
+      :ok -> :ok
+      {:error, reason} -> {:error, "failed to create directory '#{path}': #{reason}"}
+    end
+  end
 
-    # Write commondir for the worktree to find the bare repo
-    File.write!(Path.join(worktree_meta, "commondir"), "../../\n")
-
-    # Write HEAD for the worktree
-    File.write!(Path.join(worktree_meta, "HEAD"), "ref: refs/heads/#{branch}\n")
-
-    # Write .git file in worktree pointing to bare's worktrees/<branch>
-    File.write!(Path.join(worktree_dir, ".git"), "gitdir: #{worktree_meta}\n")
-
-    :ok
+  defp write_file(path, content) do
+    case File.write(path, content) do
+      :ok -> :ok
+      {:error, reason} -> {:error, "failed to write '#{path}': #{reason}"}
+    end
   end
 
   defp maybe_pop_stash(dir, branch, true) do
