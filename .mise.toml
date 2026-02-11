@@ -4,6 +4,7 @@ elixir = "1.18.3-otp-27"
 
 [tasks."release:build"]
 description = "Build a shippable tarball (cross-platform escript)"
+shell = "bash"
 run = """
 set -euo pipefail
 
