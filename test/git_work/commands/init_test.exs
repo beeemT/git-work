@@ -80,4 +80,48 @@ defmodule GitWork.Commands.InitTest do
     assert File.regular?(Path.join(main_path, "dirty.txt"))
     assert File.read!(Path.join(main_path, "dirty.txt")) == "uncommitted\n"
   end
+
+  test "rolls back cleanly when init fails mid-way", %{tmp: tmp} do
+    repo = GitWork.TestHelper.create_normal_repo(tmp)
+
+    File.write!(Path.join(repo, "main"), "block worktree dir")
+
+    File.cd!(repo)
+
+    assert {:error, msg} = Init.run([])
+    assert msg =~ "failed to create worktree directory"
+
+    # .git restored as directory, .bare removed
+    assert File.dir?(Path.join(repo, ".git"))
+    refute File.exists?(Path.join(repo, ".bare"))
+
+    # files remain at project root
+    assert File.regular?(Path.join(repo, "README.md"))
+    assert File.regular?(Path.join(repo, "src.ex"))
+    assert File.regular?(Path.join(repo, "main"))
+  end
+
+  test "sets upstream for main worktree when origin exists", %{tmp: tmp} do
+    repo = GitWork.TestHelper.create_normal_repo(tmp)
+    origin = Path.join(tmp, "origin.git")
+
+    System.cmd("git", ["init", "--bare", origin], cd: tmp)
+    System.cmd("git", ["remote", "add", "origin", origin], cd: repo)
+    System.cmd("git", ["push", "origin", "main"], cd: repo)
+
+    {_, status} =
+      System.cmd("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], cd: repo)
+
+    assert status != 0
+
+    File.cd!(repo)
+    assert {:ok, main_path} = Init.run([])
+
+    {upstream, 0} =
+      System.cmd("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        cd: main_path
+      )
+
+    assert upstream =~ "origin/main"
+  end
 end

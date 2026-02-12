@@ -43,18 +43,32 @@ defmodule GitWork.Commands.Init do
 
       true ->
         with {:ok, branch} <- current_branch(dir),
-             {:ok, stashed?} <- stash_changes(dir),
-             :ok <- move_git_to_bare(git_dir, bare_dir),
-             :ok <- write_gitdir_pointer(dir),
-             :ok <- configure_bare(bare_dir),
-             :ok <- move_files_to_worktree(dir, branch),
-             :ok <- setup_worktree_linkage(dir, branch),
-             :ok <- reset_worktree_index(dir, branch),
-             :ok <- maybe_pop_stash(dir, branch, stashed?) do
-          {:ok, Path.join(dir, branch)}
+             {:ok, stashed?} <- stash_changes(dir) do
+          case do_init_steps(dir, branch, stashed?, git_dir, bare_dir) do
+            :ok ->
+              {:ok, Path.join(dir, branch)}
+
+            {:error, msg} ->
+              rollback_init(dir, branch, stashed?)
+              {:error, msg}
+          end
         else
           {:error, msg} -> {:error, msg}
         end
+    end
+  end
+
+  defp do_init_steps(dir, branch, stashed?, git_dir, bare_dir) do
+    with :ok <- move_git_to_bare(git_dir, bare_dir),
+         :ok <- configure_bare(bare_dir),
+         :ok <- move_files_to_worktree(dir, branch),
+         :ok <- setup_worktree_linkage(dir, branch),
+         :ok <- write_gitdir_pointer(dir),
+         :ok <- reset_worktree_index(dir, branch),
+         :ok <- ensure_upstream(dir, branch),
+         :ok <- validate_init(dir, branch, bare_dir),
+         :ok <- maybe_pop_stash(dir, branch, stashed?) do
+      :ok
     end
   end
 
@@ -174,6 +188,110 @@ defmodule GitWork.Commands.Init do
       {:ok, _} -> :ok
       {:error, msg} -> {:error, "failed to reset worktree index: #{msg}"}
     end
+  end
+
+  defp ensure_upstream(dir, branch) do
+    worktree_dir = Path.join(dir, branch)
+
+    case Git.cmd(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+           cd: worktree_dir
+         ) do
+      {:ok, _} ->
+        :ok
+
+      {:error, _} ->
+        case Git.cmd(["show-ref", "--verify", "--quiet", "refs/remotes/origin/#{branch}"],
+               cd: worktree_dir
+             ) do
+          {:ok, _} ->
+            case Git.cmd(["branch", "--set-upstream-to=origin/#{branch}", branch],
+                   cd: worktree_dir
+                 ) do
+              {:ok, _} ->
+                :ok
+
+              {:error, msg} ->
+                IO.write(:stderr, "warning: failed to set upstream for #{branch}: #{msg}\n")
+                :ok
+            end
+
+          {:error, _} ->
+            :ok
+        end
+    end
+  end
+
+  defp validate_init(dir, branch, bare_dir) do
+    worktree_dir = Path.join(dir, branch)
+
+    with {:ok, "true"} <- Git.cmd(["rev-parse", "--is-inside-work-tree"], cd: worktree_dir),
+         {:ok, output} <- Git.cmd(["worktree", "list", "--porcelain"], cd: bare_dir),
+         true <- String.contains?(output, "worktree " <> worktree_dir) do
+      :ok
+    else
+      {:error, msg} -> {:error, "init verification failed: #{msg}"}
+      _ -> {:error, "init verification failed: worktree not registered"}
+    end
+  end
+
+  defp rollback_init(dir, branch, stashed?) do
+    bare_dir = Path.join(dir, ".bare")
+    git_dir = Path.join(dir, ".git")
+    worktree_dir = if branch, do: Path.join(dir, branch), else: nil
+
+    if worktree_dir && File.dir?(worktree_dir) do
+      move_result =
+        case File.ls(worktree_dir) do
+          {:ok, entries} ->
+            entries
+            |> Enum.reject(&(&1 == ".git"))
+            |> Enum.reduce(:ok, fn entry, acc ->
+              src = Path.join(worktree_dir, entry)
+              dst = Path.join(dir, entry)
+
+              case File.rename(src, dst) do
+                :ok -> acc
+                {:error, _} -> :error
+              end
+            end)
+
+          {:error, _} ->
+            :error
+        end
+
+      if move_result == :ok do
+        _ = File.rm_rf(worktree_dir)
+      else
+        IO.write(:stderr, "warning: rollback incomplete (worktree left at #{worktree_dir})\n")
+      end
+    end
+
+    if File.regular?(git_dir) do
+      _ = File.rm(git_dir)
+    end
+
+    if File.dir?(bare_dir) do
+      if branch do
+        _ = File.rm_rf(Path.join([bare_dir, "worktrees", branch]))
+      end
+
+      case File.rename(bare_dir, git_dir) do
+        :ok -> :ok
+        {:error, reason} -> IO.write(:stderr, "warning: failed to restore .git: #{reason}\n")
+      end
+    end
+
+    if stashed? do
+      case Git.cmd(["stash", "pop"], cd: dir) do
+        {:ok, _} ->
+          :ok
+
+        {:error, msg} ->
+          IO.write(:stderr, "warning: failed to pop stash after rollback: #{msg}\n")
+      end
+    end
+
+    :ok
   end
 
   defp maybe_pop_stash(dir, branch, true) do
