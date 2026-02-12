@@ -17,9 +17,8 @@ defmodule GitWork.Commands.SyncTest do
   end
 
   test "prunes worktree whose remote branch was deleted", %{tmp: tmp} do
-    origin = GitWork.TestHelper.create_origin_repo(tmp)
-    project = Path.join(tmp, "project")
-    {:ok, _} = GitWork.Commands.Clone.run([origin, project])
+    project = GitWork.TestHelper.create_gw_project(tmp)
+    origin = Path.join(tmp, "origin.git")
 
     # Create remote branch, fetch, checkout
     GitWork.TestHelper.create_remote_branch(origin, "feature-stale")
@@ -43,9 +42,8 @@ defmodule GitWork.Commands.SyncTest do
   end
 
   test "--dry-run shows candidates without removing", %{tmp: tmp} do
-    origin = GitWork.TestHelper.create_origin_repo(tmp)
-    project = Path.join(tmp, "project")
-    {:ok, _} = GitWork.Commands.Clone.run([origin, project])
+    project = GitWork.TestHelper.create_gw_project(tmp)
+    origin = Path.join(tmp, "origin.git")
 
     GitWork.TestHelper.create_remote_branch(origin, "feature-dry")
     System.cmd("git", ["fetch", "--all"], cd: Path.join(project, ".bare"))
@@ -65,9 +63,7 @@ defmodule GitWork.Commands.SyncTest do
   end
 
   test "never prunes HEAD branch", %{tmp: tmp} do
-    origin = GitWork.TestHelper.create_origin_repo(tmp)
-    project = Path.join(tmp, "project")
-    {:ok, _} = GitWork.Commands.Clone.run([origin, project])
+    project = GitWork.TestHelper.create_gw_project(tmp)
 
     File.cd!(Path.join(project, "main"))
 

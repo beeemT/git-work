@@ -115,3 +115,8 @@ mix escript.build
   Supports `--dry-run` and `--force`.
 - **Shell integration** via `eval "$(git-work --shell-hook)"` which defines a
   `gw` shell function that wraps the binary and `cd`s into path output.
+
+## Agent Instructions
+
+- Always run the test suite yourself to verify new features work.
+- Always fix lint warnings and errors before finishing.

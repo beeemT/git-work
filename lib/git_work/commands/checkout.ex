@@ -4,7 +4,7 @@ defmodule GitWork.Commands.Checkout do
   Supports fuzzy matching against existing worktrees.
   """
 
-  alias GitWork.{Git, Project, Fuzzy}
+  alias GitWork.{Git, Project, Fuzzy, Hooks}
 
   def help do
     """
@@ -111,27 +111,69 @@ defmodule GitWork.Commands.Checkout do
           {:ok, _} ->
             # Local branch exists
             case Git.cmd(["worktree", "add", worktree_dir, branch], cd: bare_dir) do
-              {:ok, _} -> {:ok, worktree_dir}
-              {:error, msg} -> {:error, "worktree add failed: #{msg}"}
+              {:ok, _} ->
+                run_hooks(root, worktree_dir, branch)
+
+              {:error, msg} ->
+                {:error, "worktree add failed: #{msg}"}
             end
 
           {:error, _} ->
             # Brand new branch
             case Git.cmd(["worktree", "add", "-b", branch, worktree_dir], cd: bare_dir) do
-              {:ok, _} -> {:ok, worktree_dir}
-              {:error, msg} -> {:error, "worktree add failed: #{msg}"}
+              {:ok, _} ->
+                run_hooks(root, worktree_dir, branch)
+
+              {:error, msg} ->
+                {:error, "worktree add failed: #{msg}"}
             end
         end
 
       {:ok, _} ->
         # Remote branch exists — track it
         case Git.cmd(["worktree", "add", worktree_dir, branch], cd: bare_dir) do
-          {:ok, _} -> {:ok, worktree_dir}
-          {:error, msg} -> {:error, "worktree add failed: #{msg}"}
+          {:ok, _} ->
+            run_hooks(root, worktree_dir, branch)
+
+          {:error, msg} ->
+            {:error, "worktree add failed: #{msg}"}
         end
 
       {:error, msg} ->
         {:error, "failed to check remote branches: #{msg}"}
     end
+  end
+
+  defp run_hooks(root, worktree_dir, branch) do
+    ctx = %{
+      root: root,
+      worktree_dir: worktree_dir,
+      branch: branch,
+      source_worktree: File.cwd!()
+    }
+
+    case Hooks.run(:post_worktree_create, ctx) do
+      :ok ->
+        {:ok, worktree_dir}
+
+      {:error, msg} ->
+        rollback_worktree(root, worktree_dir, branch, msg)
+    end
+  end
+
+  defp rollback_worktree(root, worktree_dir, branch, reason) do
+    bare_dir = Project.bare_path(root)
+
+    case Git.cmd(["worktree", "remove", worktree_dir], cd: bare_dir) do
+      {:ok, _} -> :ok
+      {:error, msg} -> IO.write(:stderr, "rollback: worktree remove failed: #{msg}\n")
+    end
+
+    case Git.cmd(["branch", "-D", branch], cd: bare_dir) do
+      {:ok, _} -> :ok
+      {:error, msg} -> IO.write(:stderr, "rollback: branch delete failed: #{msg}\n")
+    end
+
+    {:error, reason}
   end
 end

@@ -61,6 +61,10 @@ defmodule GitWork.TestHelper do
 
     {:ok, _main_path} = GitWork.Commands.Clone.run([origin, project])
 
+    # Disable mise hook by default for tests unless explicitly enabled
+    bare = Path.join(project, ".bare")
+    git(["config", "git-work.hooks.mise.task", ""], cd: bare)
+
     project
   end
 
@@ -83,7 +87,9 @@ defmodule GitWork.TestHelper do
         "commit",
         "-m",
         "add #{branch_name}"
-      ], cd: tmp)
+      ],
+      cd: tmp
+    )
 
     git(["push", "origin", branch_name], cd: tmp)
     File.rm_rf!(tmp)
@@ -96,5 +102,57 @@ defmodule GitWork.TestHelper do
   def delete_remote_branch(origin_bare, branch_name) do
     git(["branch", "-D", branch_name], cd: origin_bare)
     :ok
+  end
+
+  @doc """
+  Write a fake mise script into base_dir that supports trust/run for tests.
+  """
+  def write_hook_script(base_dir) do
+    script = Path.join(base_dir, "mise")
+
+    File.write!(script, """
+    #!/bin/sh
+    set -eu
+    cmd="$1"
+    shift || true
+
+    case "$cmd" in
+      trust)
+        if [ "${1:-}" = "--show" ]; then
+          if [ -f ".trusted" ]; then
+            echo "trusted"
+          fi
+          exit 0
+        fi
+
+        touch .trusted
+        exit 0
+        ;;
+      run)
+        task="$1"
+        if [ "$task" = "hook-fail" ]; then
+          echo "hook failed" >&2
+          exit 1
+        fi
+
+        echo "$task" > hook-ran
+        exit 0
+        ;;
+      *)
+        echo "unknown command" >&2
+        exit 1
+        ;;
+    esac
+    """)
+
+    File.chmod!(script, 0o755)
+  end
+
+  @doc """
+  Prepend base_dir to PATH for current process.
+  """
+  def prepend_path(base_dir) do
+    current = System.get_env("PATH") || ""
+    System.put_env("PATH", base_dir <> ":" <> current)
   end
 end
