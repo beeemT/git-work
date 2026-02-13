@@ -67,7 +67,7 @@ defmodule GitWork.Commands.Clone do
   end
 
   defp configure_bare(bare_dir) do
-    with {:ok, _} <- Git.cmd(["config", "core.bare", "false"], cd: bare_dir),
+    with {:ok, _} <- Git.cmd(["config", "core.bare", "true"], cd: bare_dir),
          {:ok, _} <-
            Git.cmd(
              ["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"],

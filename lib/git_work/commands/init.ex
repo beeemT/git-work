@@ -110,7 +110,7 @@ defmodule GitWork.Commands.Init do
   end
 
   defp configure_bare(bare_dir) do
-    with {:ok, _} <- Git.cmd(["config", "core.bare", "false"], cd: bare_dir) do
+    with {:ok, _} <- Git.cmd(["config", "core.bare", "true"], cd: bare_dir) do
       # Only set fetch refspec if remote origin exists
       case Git.cmd(["remote", "get-url", "origin"], cd: bare_dir) do
         {:ok, _} ->
