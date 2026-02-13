@@ -54,9 +54,21 @@ defmodule GitWork.Hooks do
 
   defp maybe_run_task(task, worktree_dir) do
     case cmd("mise", ["run", task], cd: worktree_dir) do
-      {:ok, _} -> :ok
-      {:error, msg} -> {:error, "mise run #{task} failed: #{msg}"}
+      {:ok, _} ->
+        :ok
+
+      {:error, msg} ->
+        if missing_mise_task?(msg) do
+          IO.write(:stderr, "hook: mise task #{task} not defined; skipping\n")
+          :ok
+        else
+          {:error, "mise run #{task} failed: #{msg}"}
+        end
     end
+  end
+
+  defp missing_mise_task?(msg) do
+    String.match?(msg, ~r/(no task named|task .* not found|unknown task|task .* missing)/i)
   end
 
   defp mise_trust_enabled?(root) do
