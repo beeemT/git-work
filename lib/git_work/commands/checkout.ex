@@ -9,6 +9,7 @@ defmodule GitWork.Commands.Checkout do
   def help do
     """
     usage: git-work checkout <branch>
+           git-work checkout -
            git-work checkout -b <branch>
 
     Switch to a branch by navigating to its worktree directory.
@@ -31,6 +32,7 @@ defmodule GitWork.Commands.Checkout do
 
     Examples:
       git-work checkout feature-login    # switch to existing worktree
+      git-work checkout -                # switch to previous branch
       git-work checkout login            # fuzzy match existing worktree
       git-work checkout feature/remote   # auto-create from remote branch
       git-work checkout -b feature/new   # create new worktree
@@ -41,12 +43,27 @@ defmodule GitWork.Commands.Checkout do
     case args do
       ["-b", branch] ->
         with {:ok, root} <- Project.find_root() do
+          source = current_worktree(root, File.cwd!())
+
           do_create(root, branch)
+          |> track_checkout(root, source)
+        end
+
+      ["-"] ->
+        with {:ok, root} <- Project.find_root(),
+             {:ok, branch} <- previous_worktree(root) do
+          source = current_worktree(root, File.cwd!())
+
+          do_checkout(root, branch)
+          |> track_checkout(root, source)
         end
 
       [branch] ->
         with {:ok, root} <- Project.find_root() do
+          source = current_worktree(root, File.cwd!())
+
           do_checkout(root, branch)
+          |> track_checkout(root, source)
         end
 
       _ ->
@@ -85,6 +102,83 @@ defmodule GitWork.Commands.Checkout do
           {:error, _} ->
             {:error, "no worktree found for '#{input}' (use -b to create one)"}
         end
+    end
+  end
+
+  defp previous_worktree(root) do
+    case config_get(root, "git-work.last-worktree") do
+      nil ->
+        {:error, "no previous worktree found"}
+
+      name ->
+        if name in Project.worktree_dirs(root) do
+          {:ok, name}
+        else
+          {:error, "previous worktree '#{name}' no longer exists"}
+        end
+    end
+  end
+
+  defp current_worktree(root, cwd) do
+    root = Path.expand(root)
+    cwd = Path.expand(cwd)
+    prefix = root <> "/"
+
+    cond do
+      cwd == root ->
+        nil
+
+      String.starts_with?(cwd, prefix) ->
+        relative = String.replace_prefix(cwd, prefix, "")
+        [name | _] = String.split(relative, "/")
+
+        if name in Project.worktree_dirs(root) do
+          name
+        else
+          nil
+        end
+
+      true ->
+        nil
+    end
+  end
+
+  defp track_checkout({:ok, path} = result, root, source) do
+    target = Path.basename(path)
+    source = source || config_get(root, "git-work.current-worktree")
+
+    if source != target do
+      config_set(root, "git-work.last-worktree", source)
+      config_set(root, "git-work.current-worktree", target)
+    end
+
+    result
+  end
+
+  defp track_checkout(result, _root, _source), do: result
+
+  defp config_get(root, key) do
+    bare_dir = Project.bare_path(root)
+
+    case Git.cmd(["config", "--get", key], cd: bare_dir) do
+      {:ok, ""} -> nil
+      {:ok, value} -> value
+      {:error, _} -> nil
+    end
+  end
+
+  defp config_set(_root, _key, nil), do: :ok
+
+  defp config_set(root, key, value) do
+    bare_dir = Project.bare_path(root)
+
+    case Git.cmd(["config", key, value], cd: bare_dir) do
+      {:ok, _} ->
+        :ok
+
+      {:error, msg} ->
+        IO.write(:stderr, "warning: failed to persist checkout state: #{msg}\n")
+        :ok
     end
   end
 

@@ -29,6 +29,27 @@ defmodule GitWork.Commands.CheckoutTest do
     assert path == Path.join(project, "main")
   end
 
+  test "checkout - switches to previous branch worktree", %{tmp: tmp} do
+    project = GitWork.TestHelper.create_gw_project(tmp)
+
+    File.cd!(Path.join(project, "main"))
+
+    assert {:ok, feature_path} = Checkout.run(["-b", "feature-prev"])
+    assert File.dir?(feature_path)
+
+    assert {:ok, path} = Checkout.run(["-"])
+    assert path == Path.join(project, "main")
+  end
+
+  test "checkout - errors when no previous worktree tracked", %{tmp: tmp} do
+    project = GitWork.TestHelper.create_gw_project(tmp)
+
+    File.cd!(Path.join(project, "main"))
+
+    assert {:error, msg} = Checkout.run(["-"])
+    assert msg =~ "previous worktree"
+  end
+
   test "checkout -b creates worktree for new branch", %{tmp: tmp} do
     project = GitWork.TestHelper.create_gw_project(tmp)
 

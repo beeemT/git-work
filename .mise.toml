@@ -30,3 +30,11 @@ shasum -a 256 "$DIST/$ASSET" | awk '{print $1}' > "$DIST/$ASSET.sha256"
 
 echo "Built $DIST/$ASSET"
 """
+
+[tasks.build]
+description = "Build escript"
+run = """
+set -eu
+
+mix escript.build
+"""
