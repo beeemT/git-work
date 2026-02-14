@@ -3,7 +3,7 @@ defmodule GitWork.Commands.Init do
   Convert an existing normal git repository into the worktree-based layout.
   """
 
-  alias GitWork.Git
+  alias GitWork.{Git, Project}
 
   def help do
     """
@@ -36,7 +36,7 @@ defmodule GitWork.Commands.Init do
 
     cond do
       File.dir?(bare_dir) ->
-        {:error, "already initialized (found .bare/)"}
+        do_repair(dir, git_dir, bare_dir)
 
       not File.dir?(git_dir) ->
         {:error, "not a git repository (no .git/ directory)"}
@@ -55,6 +55,60 @@ defmodule GitWork.Commands.Init do
         else
           {:error, msg} -> {:error, msg}
         end
+    end
+  end
+
+  defp do_repair(dir, git_dir, bare_dir) do
+    with :ok <- ensure_gitdir_pointer(dir, git_dir),
+         :ok <- configure_bare(bare_dir),
+         {:ok, branch} <- Project.head_branch(dir),
+         :ok <- ensure_worktree_dir(dir, branch) do
+      {:ok, Project.worktree_path(dir, branch)}
+    end
+  end
+
+  defp ensure_gitdir_pointer(dir, git_dir) do
+    cond do
+      File.dir?(git_dir) ->
+        {:error, "found .git directory; not a git-work root"}
+
+      File.regular?(git_dir) ->
+        case File.read(git_dir) do
+          {:ok, "gitdir: ./.bare\n"} ->
+            :ok
+
+          {:ok, _} ->
+            write_gitdir_pointer(dir)
+
+          {:error, reason} ->
+            {:error, "failed to read .git pointer: #{reason}"}
+        end
+
+      true ->
+        write_gitdir_pointer(dir)
+    end
+  end
+
+  defp ensure_worktree_dir(dir, branch) do
+    worktree_dir = Project.worktree_path(dir, branch)
+
+    if File.dir?(worktree_dir) do
+      :ok
+    else
+      bare_dir = Project.bare_path(dir)
+
+      case Git.cmd(["worktree", "add", worktree_dir, branch], cd: bare_dir) do
+        {:ok, _} ->
+          :ok
+
+        {:error, _msg} ->
+          _ = Git.cmd(["worktree", "prune"], cd: bare_dir)
+
+          case Git.cmd(["worktree", "add", worktree_dir, branch], cd: bare_dir) do
+            {:ok, _} -> :ok
+            {:error, msg2} -> {:error, "failed to recreate worktree: #{msg2}"}
+          end
+      end
     end
   end
 

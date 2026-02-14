@@ -60,9 +60,29 @@ defmodule GitWork.Commands.InitTest do
 
     assert {:ok, _} = Init.run([])
 
-    # Second run should fail
-    assert {:error, msg} = Init.run([])
-    assert msg =~ "already initialized"
+    # Second run should repair and succeed
+    assert {:ok, path} = Init.run([])
+    assert path == Path.join(repo, "main")
+
+    # core.bare should be true in .bare
+    {value, 0} =
+      System.cmd("git", ["config", "--bool", "core.bare"], cd: Path.join(repo, ".bare"))
+
+    assert String.trim(value) == "true"
+  end
+
+  test "recreates missing HEAD worktree on rerun", %{tmp: tmp} do
+    repo = GitWork.TestHelper.create_normal_repo(tmp)
+
+    File.cd!(repo)
+
+    assert {:ok, main_path} = Init.run([])
+    File.rm_rf!(main_path)
+
+    assert {:ok, new_path} = Init.run([])
+    assert new_path == main_path
+    assert File.dir?(new_path)
+    assert File.regular?(Path.join(new_path, "README.md"))
   end
 
   test "handles dirty working tree with stash", %{tmp: tmp} do
