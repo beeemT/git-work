@@ -135,6 +135,11 @@ defmodule GitWork.TestHelper do
           exit 1
         fi
 
+        if [ "$task" = "hook-missing" ]; then
+          echo "mise ERROR no task $task found" >&2
+          exit 1
+        fi
+
         echo "$task" > hook-ran
         exit 0
         ;;

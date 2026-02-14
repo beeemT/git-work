@@ -218,4 +218,20 @@ defmodule GitWork.Commands.CheckoutTest do
     {output, 0} = System.cmd("git", ["branch", "--list", "feature-fail"], cd: bare)
     assert output == ""
   end
+
+  test "post worktree hook ignores missing mise task", %{tmp: tmp} do
+    project = GitWork.TestHelper.create_gw_project(tmp)
+    bare = Path.join(project, ".bare")
+
+    GitWork.TestHelper.write_hook_script(tmp)
+    GitWork.TestHelper.prepend_path(tmp)
+
+    {_, 0} = System.cmd("git", ["config", "git-work.hooks.mise.task", "hook-missing"], cd: bare)
+
+    File.cd!(Path.join(project, "main"))
+
+    assert {:ok, path} = Checkout.run(["-b", "feature-missing"])
+    assert File.dir?(path)
+    refute File.regular?(Path.join(path, "hook-ran"))
+  end
 end

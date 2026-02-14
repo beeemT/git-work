@@ -68,7 +68,10 @@ defmodule GitWork.Hooks do
   end
 
   defp missing_mise_task?(msg) do
-    String.match?(msg, ~r/(no task named|task .* not found|unknown task|task .* missing)/i)
+    String.match?(
+      msg,
+      ~r/(no task named|no task .* found|task .* not found|unknown task|task .* missing)/i
+    )
   end
 
   defp mise_trust_enabled?(root) do
