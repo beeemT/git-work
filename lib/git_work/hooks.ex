@@ -53,25 +53,35 @@ defmodule GitWork.Hooks do
   defp maybe_run_task(nil, _worktree_dir), do: :ok
 
   defp maybe_run_task(task, worktree_dir) do
-    case cmd("mise", ["run", task], cd: worktree_dir) do
-      {:ok, _} ->
-        :ok
-
-      {:error, msg} ->
-        if missing_mise_task?(msg) do
-          IO.write(:stderr, "hook: mise task #{task} not defined; skipping\n")
-          :ok
-        else
-          {:error, "mise run #{task} failed: #{msg}"}
-        end
+    if mise_task_exists?(task, worktree_dir) do
+      case cmd("mise", ["run", task], cd: worktree_dir) do
+        {:ok, _} -> :ok
+        {:error, msg} -> {:error, "mise run #{task} failed: #{msg}"}
+      end
+    else
+      IO.write(:stderr, "hook: mise task #{task} not defined; skipping\n")
+      :ok
     end
   end
 
-  defp missing_mise_task?(msg) do
-    String.match?(
-      msg,
-      ~r/(no task named|no task .* found|task .* not found|unknown task|task .* missing)/i
-    )
+  defp mise_task_exists?(task, worktree_dir) do
+    case cmd("mise", ["tasks", "--json"], cd: worktree_dir) do
+      {:ok, json} ->
+        try do
+          case :json.decode(json) do
+            tasks when is_list(tasks) ->
+              Enum.any?(tasks, fn t -> is_map(t) and t["name"] == task end)
+
+            _ ->
+              false
+          end
+        rescue
+          _ -> false
+        end
+
+      {:error, _} ->
+        false
+    end
   end
 
   defp mise_trust_enabled?(root) do

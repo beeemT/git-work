@@ -128,15 +128,16 @@ defmodule GitWork.TestHelper do
         touch .trusted
         exit 0
         ;;
+      tasks)
+        # Return JSON list of known tasks (hook-task and hook-fail only).
+        # hook-missing is intentionally absent so the existence check skips it.
+        echo '[{"name":"hook-task"},{"name":"hook-fail"}]'
+        exit 0
+        ;;
       run)
         task="$1"
         if [ "$task" = "hook-fail" ]; then
           echo "hook failed" >&2
-          exit 1
-        fi
-
-        if [ "$task" = "hook-missing" ]; then
-          echo "mise ERROR no task $task found" >&2
           exit 1
         fi
 
