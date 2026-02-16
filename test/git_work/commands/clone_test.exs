@@ -43,6 +43,13 @@ defmodule GitWork.Commands.CloneTest do
     # git worktree list shows main
     {output, 0} = System.cmd("git", ["worktree", "list"], cd: Path.join(project, ".bare"))
     assert output =~ "main"
+
+    {upstream, 0} =
+      System.cmd("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        cd: main_path
+      )
+
+    assert upstream =~ "origin/main"
   end
 
   test "clone derives directory from URL", %{tmp: tmp} do
