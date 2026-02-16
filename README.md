@@ -2,14 +2,14 @@
 
 **Stop juggling branches. Give each one its own directory.**
 
-git-work wraps `git worktree` into a simple CLI that keeps one directory per branch. Switching branches means switching directories -- no more stashing, no more rebuilding, no interrupted dev servers.
+git-work wraps `git worktree` into a practical CLI for branch-per-directory workflows. Instead of `git checkout`, each branch gets its own worktree directory, so switching context is just switching directories.
 
 ```
 my-project/
-├── .bare/              # bare git repo (shared by all worktrees)
-├── main/               # worktree for main
-├── feature-login/      # worktree for feature/login
-└── fix-typo/           # worktree for fix-typo
+|- .bare/              # bare git repo (shared by all worktrees)
+|- main/               # worktree for main
+|- feature-login/      # worktree for feature/login
+`- fix-typo/           # worktree for fix-typo
 ```
 
 ## Install
@@ -18,145 +18,199 @@ my-project/
 brew tap beeemT/tap && brew install git-work
 ```
 
-## Quick Start
+## Shell integration (`gw`)
 
-**Clone a new repo:**
+git-work prints machine-readable paths to stdout. The `gw` shell function wraps `git-work` and `cd`s into returned paths automatically.
+
+```bash
+# bash / zsh
+# add to ~/.bashrc or ~/.zshrc
+eval "$(git-work activate bash)"
+
+# fish
+# add to ~/.config/fish/config.fish
+git-work activate fish | source
+```
+
+After this, use `gw` commands (examples below).
+
+## Quick start
+
+Clone into git-work layout:
 
 ```bash
 gw clone git@github.com:you/repo.git
 cd repo/main
 ```
 
-**Or convert an existing repo in-place:**
+Or convert an existing repo in place:
 
 ```bash
 cd my-project
 gw init
-# your working tree moves into my-project/<branch>/
 ```
 
-**Switch branches:**
+Switch/create worktrees:
 
 ```bash
-gw checkout feature-login   # switch to existing worktree
-gw checkout feat             # fuzzy match existing worktree
-gw checkout -b new-feature   # create new worktree for branch
+gw co main                # checkout existing worktree
+gw co login               # fuzzy match, e.g. feature-login
+gw co -b feature/new-ui   # create new worktree
 ```
 
-## Shell Integration
-
-git-work prints paths to stdout. The `gw` shell function wraps the binary and `cd`s into the output automatically. Add one of these to your shell config:
+Jump back to previous worktree:
 
 ```bash
-# bash / zsh
-eval "$(git-work activate bash)"    # or zsh
-
-# fish
-git-work activate fish | source
+gw co -
 ```
 
-Then use `gw` instead of `git-work` for seamless directory switching.
+## Commands (with shorthands)
 
-## Commands
+| Command | Alias | Description |
+|---|---|---|
+| `gw activate <shell>` | - | Print shell wrapper function (`bash`, `zsh`, `fish`) |
+| `gw clone <url> [dir]` | `gw cl` | Clone repo into `.bare/` + initial worktree |
+| `gw init` | - | Convert current repo to git-work layout |
+| `gw checkout <branch>` | `gw co` | Switch to existing worktree (supports fuzzy matching) |
+| `gw checkout -` | `gw co -` | Switch to previously visited worktree |
+| `gw checkout -b <branch>` | `gw co -b` | Create a worktree for branch |
+| `gw rm [--force] [--yes] <branch>` | - | Remove worktree + delete branch (fuzzy + confirmation) |
+| `gw sync [--dry-run] [--force]` | `gw s` | Fetch + prune stale worktrees |
+| `gw list` | `gw ls` | List worktrees |
 
-| Command | Description |
-|---|---|
-| `gw clone <url> [dir]` | Clone a repo into the worktree layout |
-| `gw init` | Convert the current repo in-place |
-| `gw checkout [-b] <branch>` | Switch to a branch (use -b to create new worktree) |
-| `gw rm [--force] <branch>` | Remove a worktree and delete the branch |
-| `gw sync [--dry-run] [--force]` | Fetch and prune worktrees for deleted remote branches |
-| `gw list` | List all worktrees |
-| `gw activate <shell>` | Print the shell wrapper function |
+## Command details
 
-### `clone <url> [directory]`
+### `gw clone` / `gw cl`
 
-Clones a repo as a bare repo in `.bare/`, sets up the directory structure, and adds a worktree for the default branch.
+- Creates `<dir>/.bare` as a bare repository
+- Writes `<dir>/.git` pointer file (`gitdir: ./.bare`)
+- Adds an initial worktree for the HEAD branch
+
+Examples:
 
 ```bash
-gw clone git@github.com:you/repo.git
-gw clone git@github.com:you/repo.git my-project
+gw cl git@github.com:you/repo.git
+gw clone https://github.com/you/repo.git my-project
 ```
 
-### `init`
+### `gw init`
 
-Converts the current repository in-place. Your `.git/` directory becomes `.bare/`, and your working files move into a subdirectory named after the current branch. Uncommitted changes are stashed and restored automatically.
+Converts a normal repo in place:
+
+1. Moves `.git/` to `.bare/`
+2. Moves working files into `<root>/<current-branch>/`
+3. Creates worktree metadata/pointers
+4. Restores stashed uncommitted changes
+
+If `gw init` is run again in an existing git-work root, it repairs workspace state (for example, rewriting `.git` pointer/config and recreating the HEAD worktree directory if missing).
+
+### `gw checkout` / `gw co`
 
 ```bash
-cd existing-repo
-gw init
+gw co <branch>
+gw co -
+gw co -b <branch>
 ```
 
-### `checkout <branch>`
+Behavior:
 
-Switches to an existing worktree. Supports fuzzy matching -- a partial branch name works as long as it's unambiguous.
+- `gw co <branch>`: switch to existing worktree by exact/fuzzy match
+- `gw co -`: switch to previous worktree
+- `gw co -b <branch>`: create new worktree (existing local branch, remote branch, or new branch)
+- If no local worktree matches but a remote branch with exact name exists, `gw co <branch>` auto-creates a tracking worktree
+
+Fuzzy matching order:
+
+1. Exact directory match
+2. Substring match
+3. Jaro-Winkler similarity (threshold 0.85)
+
+Ambiguous matches exit non-zero and list candidates.
+
+### `gw rm`
 
 ```bash
-gw checkout main               # exact match
-gw checkout feat               # fuzzy: matches "feature-login"
+gw rm [--force] [--yes] <branch>
 ```
 
-To create a new worktree for a branch (existing or new), use `-b`:
+Behavior:
 
-```bash
-gw checkout -b new-feature     # create new worktree + branch
-gw checkout -b feature-login   # create new worktree for existing branch
-```
+- Supports fuzzy matching of the branch/worktree argument
+- Prompts for confirmation before deleting
+- `--yes` skips the confirmation prompt
+- Refuses to remove the HEAD branch unless `--force` is passed
+- If run from inside the removed worktree, returns the HEAD worktree path so `gw` can move you safely
 
-If multiple branches match, git-work lists the candidates and exits with an error so you can be more specific.
-
-### `rm [--force] <branch>`
-
-Removes a worktree and deletes its branch. The HEAD branch (usually `main`) is protected unless `--force` is passed. If you're inside the worktree being removed, `gw` moves you to the HEAD branch worktree.
+Examples:
 
 ```bash
 gw rm feature-login
-gw rm --force stale-experiment
+gw rm login
+gw rm --yes feature-login
+gw rm --force old-branch
 ```
 
-### `sync [--dry-run] [--force]`
-
-Fetches all remotes, then removes worktrees whose tracking branch no longer exists on the remote. The HEAD branch is never pruned.
+### `gw sync` / `gw s`
 
 ```bash
-gw sync              # fetch + prune stale worktrees
-gw sync --dry-run    # preview what would be pruned
-gw sync --force      # force-remove worktrees with unmerged changes
+gw sync [--dry-run] [--force]
 ```
 
-### `list`
+Behavior:
 
-Lists all worktrees (thin wrapper around `git worktree list`).
+- Runs `git fetch --all --prune`
+- Removes local worktrees whose tracking remote branch no longer exists
+- Never prunes HEAD branch
+- `--dry-run` previews removals
+- `--force` force-removes stale worktrees/branches
+
+### `gw list` / `gw ls`
+
+Shows a formatted worktree table:
+
+- directory name
+- branch name
+- `*` marker for current worktree
+
+## Hooks and mise integration
+
+When creating a new worktree (`gw co -b ...` or remote auto-create), git-work runs a post-create hook with mise integration.
+
+- If `mise` is not installed, hook is skipped
+- By default, git-work attempts:
+  - trust propagation (`mise trust`) when source worktree is trusted
+  - task execution: `mise run worktree:setup`
+
+Configuration (stored in repo git config under `.bare`):
 
 ```bash
-gw list
+# disable trust propagation
+git -C .bare config git-work.hooks.mise.trust false
+
+# choose custom setup task
+git -C .bare config git-work.hooks.mise.task bootstrap
+
+# disable task execution
+git -C .bare config git-work.hooks.mise.task ""
 ```
 
-## Design
+If the configured task does not exist, git-work logs a warning and continues. If the task fails, worktree creation is rolled back.
 
-- **stdout is for paths only.** All human-facing messages go to stderr. This is what makes the `gw` shell wrapper work -- it `cd`s into stdout when it's a directory.
-- **No config files, no database, no state.** Everything is derived from git and the filesystem at runtime.
-- **Branch-to-directory mapping:** `/` in branch names becomes `-` in directory names. `feature/login` lives in `feature-login/`. The real branch name is always used in git commands.
-- **Fuzzy matching** tries substring match first, then Jaro-Winkler similarity (threshold 0.85). A single match wins; ambiguous matches are reported as errors.
+## Design notes
 
-## Why?
-
-`git worktree` is powerful but verbose. Setting up a bare-repo-based layout requires several manual steps and knowledge of git internals. git-work handles all of that so you can just think in terms of branches and directories.
-
-Common benefits:
-- Run a dev server on `main` while working on a feature branch in another terminal
-- Keep IDE state, build caches, and `node_modules` per branch
-- Review PRs without disrupting your current work
-- Never lose uncommitted changes to an accidental checkout
+- stdout is reserved for machine-readable output (paths)
+- human-readable messages/warnings/errors go to stderr
+- no state files: behavior is derived from git + filesystem
+- branch-to-directory mapping replaces `/` with `-`
 
 ## Development
 
 ```bash
-mise install                      # install Elixir + Erlang
-mix deps.get && mix compile       # compile
-mix test                          # run tests
-mix escript.build                 # build the binary
-./git_work --help                 # run it
+mise install
+mix deps.get && mix compile
+mix test
+mix escript.build
+./git_work --help
 ```
 
 ## License

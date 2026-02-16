@@ -1,6 +1,8 @@
 defmodule GitWork.Commands.RmTest do
   use ExUnit.Case
 
+  import ExUnit.CaptureIO
+
   alias GitWork.Commands.{Rm, Checkout}
 
   setup do
@@ -20,7 +22,7 @@ defmodule GitWork.Commands.RmTest do
     {:ok, tmp: tmp}
   end
 
-  test "removes worktree and branch", %{tmp: tmp} do
+  test "removes worktree and branch after confirmation", %{tmp: tmp} do
     project = GitWork.TestHelper.create_gw_project(tmp)
 
     File.cd!(Path.join(project, "main"))
@@ -30,7 +32,9 @@ defmodule GitWork.Commands.RmTest do
     assert File.dir?(Path.join(project, "feature-rm-test"))
 
     # Remove it
-    assert {:ok, _} = Rm.run(["feature-rm-test"])
+    capture_io("yes\n", fn ->
+      assert {:ok, _} = Rm.run(["feature-rm-test"])
+    end)
 
     # Directory should be gone
     refute File.dir?(Path.join(project, "feature-rm-test"))
@@ -67,8 +71,48 @@ defmodule GitWork.Commands.RmTest do
     # cd into the feature worktree
     File.cd!(Path.join(project, "feature-inside"))
 
-    assert {:ok, path} = Rm.run(["feature-inside"])
+    assert {:ok, path} = Rm.run(["--yes", "feature-inside"])
     # Should return main path for shell wrapper to cd into
     assert path == Path.join(project, "main")
+  end
+
+  test "aborts when confirmation is declined", %{tmp: tmp} do
+    project = GitWork.TestHelper.create_gw_project(tmp)
+
+    File.cd!(Path.join(project, "main"))
+    {:ok, _} = Checkout.run(["-b", "feature-abort"])
+
+    capture_io("n\n", fn ->
+      assert {:error, msg} = Rm.run(["feature-abort"])
+      assert msg =~ "aborted"
+    end)
+
+    assert File.dir?(Path.join(project, "feature-abort"))
+  end
+
+  test "removes without prompting when --yes is passed", %{tmp: tmp} do
+    project = GitWork.TestHelper.create_gw_project(tmp)
+
+    File.cd!(Path.join(project, "main"))
+    {:ok, _} = Checkout.run(["-b", "feature-yes"])
+
+    # No stdin capture here: this would fail if rm still required interaction.
+    assert {:ok, _} = Rm.run(["--yes", "feature-yes"])
+    refute File.dir?(Path.join(project, "feature-yes"))
+  end
+
+  test "fuzzy matching removes the matched branch", %{tmp: tmp} do
+    project = GitWork.TestHelper.create_gw_project(tmp)
+    bare = Path.join(project, ".bare")
+
+    File.cd!(Path.join(project, "main"))
+    {:ok, _} = Checkout.run(["-b", "feature/login"])
+    assert File.dir?(Path.join(project, "feature-login"))
+
+    assert {:ok, _} = Rm.run(["--yes", "login"])
+    refute File.dir?(Path.join(project, "feature-login"))
+
+    {branches, 0} = System.cmd("git", ["branch"], cd: bare)
+    refute branches =~ "feature/login"
   end
 end

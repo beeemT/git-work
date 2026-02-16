@@ -96,7 +96,7 @@ defmodule GitWork.CLI do
       clone (cl) <url> [<dir>]    Clone a repo into worktree-based layout
       init                        Convert current repo to worktree-based layout
       checkout (co) <branch>      Switch to branch worktree (fuzzy match supported)
-      rm <branch>                 Remove a worktree and its branch
+      rm [--force] [--yes] <branch>  Remove a worktree and its branch
       sync (s) [--dry-run]        Fetch and prune stale worktrees
       list (ls)                   List all worktrees
 
