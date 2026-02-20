@@ -95,7 +95,7 @@ defmodule GitWork.Hooks do
     case config_get_string(root, "git-work.hooks.mise.task") do
       {:ok, ""} -> nil
       {:ok, value} -> value
-      :unset -> "worktree:setup"
+      :unset -> "worktree-setup"
     end
   end
 

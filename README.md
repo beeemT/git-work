@@ -179,7 +179,7 @@ When creating a new worktree (`gw co -b ...` or remote auto-create), git-work ru
 - If `mise` is not installed, hook is skipped
 - By default, git-work attempts:
   - trust propagation (`mise trust`) when source worktree is trusted
-  - task execution: `mise run worktree:setup`
+  - task execution: `mise run worktree-setup`
 
 Configuration (stored in repo git config under `.bare`):
 
