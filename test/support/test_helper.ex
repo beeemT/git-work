@@ -59,7 +59,7 @@ defmodule GitWork.TestHelper do
     origin = create_origin_repo(base_dir)
     project = Path.join(base_dir, "project")
 
-    {:ok, _main_path} = GitWork.Commands.Clone.run([origin, project])
+    {:ok, _main_path} = GitWork.Commands.Clone.run([origin, project], :text)
 
     # Disable mise hook by default for tests unless explicitly enabled
     bare = Path.join(project, ".bare")

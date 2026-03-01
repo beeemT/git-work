@@ -19,7 +19,7 @@ defmodule GitWork.Commands.List do
     """
   end
 
-  def run(_args) do
+  def run(_args, format) do
     with {:ok, root} <- Project.find_root() do
       bare_dir = Project.bare_path(root)
 
@@ -30,14 +30,32 @@ defmodule GitWork.Commands.List do
             |> parse_porcelain(root)
             |> Enum.reject(fn e -> String.starts_with?(e.dir, ".") end)
 
-          formatted = format_table(entries, File.cwd!())
-          IO.write(:stderr, formatted)
-          {:ok, ""}
+          output_result = output_for_list(entries, File.cwd!())
+
+          case format do
+            :json -> {:ok, output_result}
+            :text -> GitWork.Output.print(output_result, :text); {:ok, ""}
+          end
 
         {:error, msg} ->
           {:error, "worktree list failed: #{msg}"}
       end
     end
+  end
+
+  defp output_for_list(entries, cwd) do
+    %GitWork.Output{
+      data: %{
+        worktrees: Enum.map(entries, fn e ->
+          %{
+            dir: e.dir,
+            branch: e.branch,
+            current: e.path == cwd
+          }
+        end)
+      },
+      messages: [%{level: :info, text: format_table(entries, cwd)}]
+    }
   end
 
   @doc false

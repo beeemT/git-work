@@ -23,11 +23,11 @@ defmodule GitWork.Commands.ListTest do
 
     File.cd!(Path.join(project, "main"))
 
-    {:ok, _} = Checkout.run(["-b", "feature-list-test"])
+    {:ok, _} = Checkout.run(["-b", "feature-list-test"], :text)
 
     stderr =
       capture_io(:stderr, fn ->
-        assert {:ok, ""} = List.run([])
+        assert {:ok, ""} = List.run([], :text)
       end)
 
     assert stderr =~ "main"
@@ -42,14 +42,14 @@ defmodule GitWork.Commands.ListTest do
 
     File.cd!(Path.join(project, "main"))
 
-    {:ok, _} = Checkout.run(["-b", "other-branch"])
+    {:ok, _} = Checkout.run(["-b", "other-branch"], :text)
 
     # cd into main — main should be marked
     File.cd!(Path.join(project, "main"))
 
     stderr =
       capture_io(:stderr, fn ->
-        assert {:ok, ""} = List.run([])
+        assert {:ok, ""} = List.run([], :text)
       end)
 
     lines = String.split(stderr, "\n", trim: true)
@@ -67,7 +67,7 @@ defmodule GitWork.Commands.ListTest do
 
     stderr =
       capture_io(:stderr, fn ->
-        assert {:ok, ""} = List.run([])
+        assert {:ok, ""} = List.run([], :text)
       end)
 
     # The main worktree should show branch "main"

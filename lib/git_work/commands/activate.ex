@@ -24,19 +24,19 @@ defmodule GitWork.Commands.Activate do
     """
   end
 
-  def run([shell]) do
+  def run([shell], _format) do
     case ShellHook.generate(shell) do
       {:error, _} = err -> err
       code when is_binary(code) -> {:ok, code}
     end
   end
 
-  def run([]) do
+  def run([], _format) do
     {:error,
      "activate requires a shell argument (#{Enum.join(ShellHook.supported_shells(), ", ")})"}
   end
 
-  def run(_args) do
+  def run(_args, _format) do
     {:error, "activate takes exactly one argument: the shell name"}
   end
 end

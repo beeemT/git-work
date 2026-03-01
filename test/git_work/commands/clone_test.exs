@@ -20,7 +20,7 @@ defmodule GitWork.Commands.CloneTest do
     origin = GitWork.TestHelper.create_origin_repo(tmp)
     project = Path.join(tmp, "myproject")
 
-    assert {:ok, main_path} = Clone.run([origin, project])
+    assert {:ok, main_path} = Clone.run([origin, project], :text)
     assert main_path == Path.join(project, "main")
 
     # .bare/ exists and is a git dir
@@ -59,7 +59,7 @@ defmodule GitWork.Commands.CloneTest do
     # cd to tmp so relative paths work
     File.cd!(tmp)
 
-    assert {:ok, _} = Clone.run([origin])
+    assert {:ok, _} = Clone.run([origin], :text)
 
     # Should have created "origin/" directory (stripped .git suffix)
     assert File.dir?(Path.join(tmp, "origin"))
@@ -71,7 +71,7 @@ defmodule GitWork.Commands.CloneTest do
     project = Path.join(tmp, "existing")
     File.mkdir_p!(project)
 
-    assert {:error, msg} = Clone.run([origin, project])
+    assert {:error, msg} = Clone.run([origin, project], :text)
     assert msg =~ "already exists"
   end
 end

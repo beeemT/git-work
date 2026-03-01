@@ -20,6 +20,8 @@ defmodule GitWork.CLI do
   }
 
   def run(args) do
+    {format, args} = extract_format(args)
+
     case args do
       ["--help"] ->
         print_help()
@@ -37,7 +39,7 @@ defmodule GitWork.CLI do
         if "--help" in rest or "-h" in rest do
           print_command_help(command)
         else
-          dispatch(command, rest)
+          dispatch(command, rest, format)
         end
 
       [] ->
@@ -45,34 +47,55 @@ defmodule GitWork.CLI do
     end
   end
 
-  defp dispatch(command, args) do
+  defp extract_format(args) do
+    case Enum.split_with(args, &(&1 == "--format=json")) do
+      {format_args, rest} when format_args != [] ->
+        {:json, rest}
+
+      _ ->
+        {:text, args}
+    end
+  end
+
+  defp dispatch(command, args, format) do
     case Map.get(@commands, command) do
       nil ->
-        IO.write(:stderr, "git-work: unknown command '#{command}'\n\n")
+        GitWork.Output.print_error("unknown command '#{command}'", format)
         print_help()
         System.halt(1)
 
       module ->
         result =
           try do
-            module.run(args)
+            module.run(args, format)
           rescue
             e ->
               {:error, "unexpected error: #{Exception.message(e)}"}
           end
 
-        handle_result(result)
+        handle_result(result, format)
     end
   end
 
-  defp handle_result({:ok, output}) when is_binary(output) and output != "" do
-    IO.puts(output)
+  defp handle_result({:ok, %GitWork.Output{} = output}, format) do
+    GitWork.Output.print(output, format)
   end
 
-  defp handle_result({:ok, _}), do: :ok
+  defp handle_result({:ok, output}, format) when is_binary(output) and output != "" do
+    case format do
+      :json ->
+        json = JSON.encode!(%{path: output, messages: []})
+        IO.write(:stderr, json <> "\n")
 
-  defp handle_result({:error, message}) do
-    IO.write(:stderr, "git-work: #{message}\n")
+      :text ->
+        IO.puts(output)
+    end
+  end
+
+  defp handle_result({:ok, _}, _format), do: :ok
+
+  defp handle_result({:error, message}, format) do
+    GitWork.Output.print_error(message, format)
     System.halt(1)
   end
 
@@ -89,7 +112,7 @@ defmodule GitWork.CLI do
 
   defp print_help do
     IO.write(:stderr, """
-    usage: git-work <command> [<args>]
+    usage: git-work [--format=json] <command> [<args>]
 
     Commands:
       activate <shell>       Print shell integration (bash, zsh, fish)
@@ -100,8 +123,9 @@ defmodule GitWork.CLI do
       sync (s) [--dry-run]        Fetch and prune stale worktrees
       list (ls)                   List all worktrees
 
-    Options:
-      --help                 Show this help
+    Global options:
+      --format=json    Output results as JSON to stderr
+      --help           Show this help
 
     Run 'git-work <command> --help' for more information on a specific command.
     """)

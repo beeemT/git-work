@@ -28,12 +28,12 @@ defmodule GitWork.Commands.RmTest do
     File.cd!(Path.join(project, "main"))
 
     # Create a feature branch
-    {:ok, _} = Checkout.run(["-b", "feature-rm-test"])
+    {:ok, _} = Checkout.run(["-b", "feature-rm-test"], :text)
     assert File.dir?(Path.join(project, "feature-rm-test"))
 
     # Remove it
     capture_io("yes\n", fn ->
-      assert {:ok, _} = Rm.run(["feature-rm-test"])
+      assert {:ok, _} = Rm.run(["feature-rm-test"], :text)
     end)
 
     # Directory should be gone
@@ -53,7 +53,7 @@ defmodule GitWork.Commands.RmTest do
 
     File.cd!(Path.join(project, "main"))
 
-    assert {:error, msg} = Rm.run(["main"])
+    assert {:error, msg} = Rm.run(["main"], :text)
     assert msg =~ "refusing"
     assert msg =~ "force"
 
@@ -66,12 +66,12 @@ defmodule GitWork.Commands.RmTest do
 
     File.cd!(Path.join(project, "main"))
 
-    {:ok, _} = Checkout.run(["-b", "feature-inside"])
+    {:ok, _} = Checkout.run(["-b", "feature-inside"], :text)
 
     # cd into the feature worktree
     File.cd!(Path.join(project, "feature-inside"))
 
-    assert {:ok, path} = Rm.run(["--yes", "feature-inside"])
+    assert {:ok, path} = Rm.run(["--yes", "feature-inside"], :text)
     # Should return main path for shell wrapper to cd into
     assert path == Path.join(project, "main")
   end
@@ -80,10 +80,10 @@ defmodule GitWork.Commands.RmTest do
     project = GitWork.TestHelper.create_gw_project(tmp)
 
     File.cd!(Path.join(project, "main"))
-    {:ok, _} = Checkout.run(["-b", "feature-abort"])
+    {:ok, _} = Checkout.run(["-b", "feature-abort"], :text)
 
     capture_io("n\n", fn ->
-      assert {:error, msg} = Rm.run(["feature-abort"])
+      assert {:error, msg} = Rm.run(["feature-abort"], :text)
       assert msg =~ "aborted"
     end)
 
@@ -94,10 +94,10 @@ defmodule GitWork.Commands.RmTest do
     project = GitWork.TestHelper.create_gw_project(tmp)
 
     File.cd!(Path.join(project, "main"))
-    {:ok, _} = Checkout.run(["-b", "feature-yes"])
+    {:ok, _} = Checkout.run(["-b", "feature-yes"], :text)
 
     # No stdin capture here: this would fail if rm still required interaction.
-    assert {:ok, _} = Rm.run(["--yes", "feature-yes"])
+    assert {:ok, _} = Rm.run(["--yes", "feature-yes"], :text)
     refute File.dir?(Path.join(project, "feature-yes"))
   end
 
@@ -106,10 +106,10 @@ defmodule GitWork.Commands.RmTest do
     bare = Path.join(project, ".bare")
 
     File.cd!(Path.join(project, "main"))
-    {:ok, _} = Checkout.run(["-b", "feature/login"])
+    {:ok, _} = Checkout.run(["-b", "feature/login"], :text)
     assert File.dir?(Path.join(project, "feature-login"))
 
-    assert {:ok, _} = Rm.run(["--yes", "login"])
+    assert {:ok, _} = Rm.run(["--yes", "login"], :text)
     refute File.dir?(Path.join(project, "feature-login"))
 
     {branches, 0} = System.cmd("git", ["branch"], cd: bare)

@@ -25,7 +25,7 @@ defmodule GitWork.Commands.Sync do
     """
   end
 
-  def run(args) do
+  def run(args, _format) do
     {opts, _, _} =
       OptionParser.parse(args,
         strict: [dry_run: :boolean, force: :boolean],

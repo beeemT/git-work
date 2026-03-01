@@ -25,7 +25,7 @@ defmodule GitWork.Commands.Init do
     """
   end
 
-  def run(_args) do
+  def run(_args, _format) do
     cwd = File.cwd!()
     do_init(cwd)
   end

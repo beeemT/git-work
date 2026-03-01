@@ -25,7 +25,7 @@ defmodule GitWork.Commands.InitTest do
 
     File.cd!(repo)
 
-    assert {:ok, main_path} = Init.run([])
+    assert {:ok, main_path} = Init.run([], :text)
     assert main_path == Path.join(repo, "main")
 
     # .bare/ exists
@@ -58,10 +58,10 @@ defmodule GitWork.Commands.InitTest do
 
     File.cd!(repo)
 
-    assert {:ok, _} = Init.run([])
+    assert {:ok, _} = Init.run([], :text)
 
     # Second run should repair and succeed
-    assert {:ok, path} = Init.run([])
+    assert {:ok, path} = Init.run([], :text)
     assert path == Path.join(repo, "main")
 
     # core.bare should be true in .bare
@@ -76,10 +76,10 @@ defmodule GitWork.Commands.InitTest do
 
     File.cd!(repo)
 
-    assert {:ok, main_path} = Init.run([])
+    assert {:ok, main_path} = Init.run([], :text)
     File.rm_rf!(main_path)
 
-    assert {:ok, new_path} = Init.run([])
+    assert {:ok, new_path} = Init.run([], :text)
     assert new_path == main_path
     assert File.dir?(new_path)
     assert File.regular?(Path.join(new_path, "README.md"))
@@ -94,7 +94,7 @@ defmodule GitWork.Commands.InitTest do
 
     File.cd!(repo)
 
-    assert {:ok, main_path} = Init.run([])
+    assert {:ok, main_path} = Init.run([], :text)
 
     # The dirty file should be in the worktree (stash popped)
     assert File.regular?(Path.join(main_path, "dirty.txt"))
@@ -108,7 +108,7 @@ defmodule GitWork.Commands.InitTest do
 
     File.cd!(repo)
 
-    assert {:error, msg} = Init.run([])
+    assert {:error, msg} = Init.run([], :text)
     assert msg =~ "failed to create worktree directory"
 
     # .git restored as directory, .bare removed
@@ -135,7 +135,7 @@ defmodule GitWork.Commands.InitTest do
     assert status != 0
 
     File.cd!(repo)
-    assert {:ok, main_path} = Init.run([])
+    assert {:ok, main_path} = Init.run([], :text)
 
     {upstream, 0} =
       System.cmd("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],

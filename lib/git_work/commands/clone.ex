@@ -22,7 +22,7 @@ defmodule GitWork.Commands.Clone do
     """
   end
 
-  def run(args) do
+  def run(args, _format) do
     case args do
       [url] ->
         dir = Project.dir_from_url(url)

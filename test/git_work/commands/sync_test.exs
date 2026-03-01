@@ -26,7 +26,7 @@ defmodule GitWork.Commands.SyncTest do
 
     File.cd!(Path.join(project, "main"))
 
-    {:ok, _} = Checkout.run(["-b", "feature-stale"])
+    {:ok, _} = Checkout.run(["-b", "feature-stale"], :text)
     assert File.dir?(Path.join(project, "feature-stale"))
 
     # Go back to main before deleting
@@ -36,7 +36,7 @@ defmodule GitWork.Commands.SyncTest do
     GitWork.TestHelper.delete_remote_branch(origin, "feature-stale")
 
     # Sync should prune it
-    assert {:ok, _} = Sync.run([])
+    assert {:ok, _} = Sync.run([], :text)
 
     refute File.dir?(Path.join(project, "feature-stale"))
   end
@@ -50,13 +50,13 @@ defmodule GitWork.Commands.SyncTest do
 
     File.cd!(Path.join(project, "main"))
 
-    {:ok, _} = Checkout.run(["-b", "feature-dry"])
+    {:ok, _} = Checkout.run(["-b", "feature-dry"], :text)
     File.cd!(Path.join(project, "main"))
 
     GitWork.TestHelper.delete_remote_branch(origin, "feature-dry")
 
     # Dry run
-    assert {:ok, _} = Sync.run(["--dry-run"])
+    assert {:ok, _} = Sync.run(["--dry-run"], :text)
 
     # Worktree should still exist
     assert File.dir?(Path.join(project, "feature-dry"))
@@ -68,7 +68,7 @@ defmodule GitWork.Commands.SyncTest do
     File.cd!(Path.join(project, "main"))
 
     # Sync should never touch main
-    assert {:ok, _} = Sync.run([])
+    assert {:ok, _} = Sync.run([], :text)
     assert File.dir?(Path.join(project, "main"))
   end
 end

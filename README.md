@@ -78,6 +78,47 @@ gw co -
 | `gw sync [--dry-run] [--force]` | `gw s` | Fetch + prune stale worktrees |
 | `gw list` | `gw ls` | List worktrees |
 
+## Global options
+
+| Flag | Description |
+|---|---|
+| `--format=json` | Output results as JSON to stderr |
+| `--help` | Show help |
+
+### JSON output
+
+When `--format=json` is passed, output is written to stderr as JSON:
+
+```bash
+gw --format=json list
+```
+
+Output format:
+
+```json
+{
+  "path": "/path/to/worktree",
+  "data": { ... },
+  "messages": [{"level": "info", "text": "..."}]
+}
+```
+
+Errors:
+
+```json
+{
+  "error": "error message",
+  "messages": [{"level": "error", "text": "error message"}]
+}
+```
+
+Example - list worktrees as JSON:
+
+```bash
+$ gw --format=json list
+{"data":{"worktrees":[{"dir":"main","branch":"main","current":true}]},"messages":[...]}
+```
+
 ## Command details
 
 ### `gw clone` / `gw cl`

@@ -39,7 +39,7 @@ defmodule GitWork.Commands.Checkout do
     """
   end
 
-  def run(args) do
+  def run(args, _format) do
     case args do
       ["-b", branch] ->
         with {:ok, root} <- Project.find_root() do

@@ -31,7 +31,7 @@ defmodule GitWork.Commands.Rm do
     """
   end
 
-  def run(args) do
+  def run(args, _format) do
     {opts, rest, _} = OptionParser.parse(args, strict: [force: :boolean, yes: :boolean])
     force? = Keyword.get(opts, :force, false)
     yes? = Keyword.get(opts, :yes, false)
