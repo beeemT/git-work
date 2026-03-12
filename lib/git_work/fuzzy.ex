@@ -2,6 +2,8 @@ defmodule GitWork.Fuzzy do
   @moduledoc """
   Fuzzy matching for worktree/branch names.
   Priority: exact match > substring match > Jaro-Winkler similarity.
+  Matching is case-insensitive by default; case-sensitivity is used only to
+  disambiguate when multiple candidates match.
   """
 
   @jaro_threshold 0.85
@@ -26,7 +28,7 @@ defmodule GitWork.Fuzzy do
             {:match, single}
 
           [_ | _] = multiple ->
-            {:ambiguous, multiple}
+            disambiguate_substring(input, multiple)
 
           [] ->
             jaro_match(input, candidates)
@@ -35,15 +37,26 @@ defmodule GitWork.Fuzzy do
   end
 
   defp substring_matches(input, candidates) do
+    down_input = String.downcase(input)
+
     Enum.filter(candidates, fn candidate ->
-      String.contains?(candidate, input)
+      String.contains?(String.downcase(candidate), down_input)
     end)
   end
 
+  defp disambiguate_substring(input, matches) do
+    case Enum.filter(matches, &String.contains?(&1, input)) do
+      [single] -> {:match, single}
+      _ -> {:ambiguous, matches}
+    end
+  end
+
   defp jaro_match(input, candidates) do
+    down_input = String.downcase(input)
+
     scores =
       candidates
-      |> Enum.map(fn candidate -> {candidate, String.jaro_distance(input, candidate)} end)
+      |> Enum.map(fn candidate -> {candidate, String.jaro_distance(down_input, String.downcase(candidate))} end)
       |> Enum.filter(fn {_candidate, score} -> score >= @jaro_threshold end)
       |> Enum.sort_by(fn {_candidate, score} -> score end, :desc)
 
@@ -58,7 +71,24 @@ defmodule GitWork.Fuzzy do
         {:match, best}
 
       multiple ->
-        {:ambiguous, Enum.map(multiple, fn {name, _} -> name end)}
+        disambiguate_jaro(input, multiple)
+    end
+  end
+
+  defp disambiguate_jaro(input, tied_matches) do
+    names = Enum.map(tied_matches, fn {name, _} -> name end)
+
+    cs_scores =
+      tied_matches
+      |> Enum.map(fn {name, _} -> {name, String.jaro_distance(input, name)} end)
+      |> Enum.sort_by(fn {_, score} -> score end, :desc)
+
+    case cs_scores do
+      [{best, best_score}, {_second, second_score} | _] when best_score > second_score ->
+        {:match, best}
+
+      _ ->
+        {:ambiguous, names}
     end
   end
 end

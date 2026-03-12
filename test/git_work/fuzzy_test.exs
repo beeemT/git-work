@@ -37,4 +37,40 @@ defmodule GitWork.FuzzyTest do
       assert {:match, "feature-login"} = result
     end
   end
+
+  describe "case-insensitive matching" do
+    test "substring match is case-insensitive" do
+      assert Fuzzy.match("Login", ["feature-login", "fix-typo"]) == {:match, "feature-login"}
+    end
+
+    test "uppercase input matches lowercase candidate" do
+      assert Fuzzy.match("LOGIN", ["feature-login", "fix-typo"]) == {:match, "feature-login"}
+    end
+
+    test "lowercase input matches uppercase candidate" do
+      assert Fuzzy.match("login", ["Feature-Login", "fix-typo"]) == {:match, "Feature-Login"}
+    end
+
+    test "case-sensitive disambiguation picks exact case match" do
+      result = Fuzzy.match("Login", ["feature-login", "feature-Login"])
+      assert {:match, "feature-Login"} = result
+    end
+
+    test "ambiguous when case-sensitive does not narrow to one" do
+      result = Fuzzy.match("Feat", ["Feature-login", "Feature-signup"])
+      assert {:ambiguous, candidates} = result
+      assert "Feature-login" in candidates
+      assert "Feature-signup" in candidates
+    end
+
+    test "jaro-winkler is case-insensitive" do
+      result = Fuzzy.match("FEATUR-LOGIN", ["feature-login", "fix-typo"])
+      assert {:match, "feature-login"} = result
+    end
+
+    test "exact match is still case-sensitive" do
+      refute Fuzzy.match("Main", ["main", "develop"]) == {:exact, "Main"}
+      assert Fuzzy.match("Main", ["main", "develop"]) == {:match, "main"}
+    end
+  end
 end
