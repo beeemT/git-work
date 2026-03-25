@@ -9,9 +9,48 @@ defmodule GitWork.Hooks do
     run_mise_hook(ctx)
   end
 
+  # Applied after `init` completes. Only propagates trust — does not run the
+  # worktree-setup task, which is for newly-created worktrees from checkout.
+  # Failure is non-fatal: init.ex demotes the error to a stderr warning.
+  def run(:post_init, %{root: root, worktree_dir: worktree_dir, was_trusted: was_trusted}) do
+    case System.find_executable("mise") do
+      nil ->
+        :ok
+
+      _path ->
+        if was_trusted and mise_trust_enabled?(root) do
+          case cmd("mise", ["trust"], cd: worktree_dir) do
+            {:ok, _} -> :ok
+            {:error, msg} -> {:error, "mise trust failed: #{msg}"}
+          end
+        else
+          :ok
+        end
+    end
+  end
+
   def run(:post_checkout, _ctx), do: :ok
 
   def run(_event, _ctx), do: :ok
+
+  @doc """
+  Returns true if the given directory is currently mise-trusted.
+  Intended to be called before files are moved (e.g. during `init`),
+  so the trust status of the original location can be captured before
+  `.mise.toml` migrates to the new worktree directory.
+  """
+  def source_trusted?(dir) do
+    case System.find_executable("mise") do
+      nil ->
+        false
+
+      _path ->
+        case cmd("mise", ["trust", "--show"], cd: dir) do
+          {:ok, output} when output != "" -> true
+          _ -> false
+        end
+    end
+  end
 
   defp run_mise_hook(%{root: root, worktree_dir: worktree_dir} = ctx) do
     case System.find_executable("mise") do

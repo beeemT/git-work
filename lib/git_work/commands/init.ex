@@ -3,7 +3,7 @@ defmodule GitWork.Commands.Init do
   Convert an existing normal git repository into the worktree-based layout.
   """
 
-  alias GitWork.{Git, Project}
+  alias GitWork.{Git, Hooks, Project}
 
   def help do
     """
@@ -44,9 +44,14 @@ defmodule GitWork.Commands.Init do
       true ->
         with {:ok, branch} <- current_branch(dir),
              {:ok, stashed?} <- stash_changes(dir) do
+          # Capture trust before move_files_to_worktree relocates .mise.toml
+          was_trusted = Hooks.source_trusted?(dir)
+
           case do_init_steps(dir, branch, stashed?, git_dir, bare_dir) do
             :ok ->
-              {:ok, Path.join(dir, branch)}
+              worktree_dir = Path.join(dir, branch)
+              maybe_propagate_trust(dir, worktree_dir, was_trusted)
+              {:ok, worktree_dir}
 
             {:error, msg} ->
               rollback_init(dir, branch, stashed?)
@@ -362,4 +367,20 @@ defmodule GitWork.Commands.Init do
   end
 
   defp maybe_pop_stash(_dir, _branch, false), do: :ok
+
+  # Non-fatal: a failure to propagate trust is a warning, not a reason to
+  # undo an otherwise successful init. The user can always run `mise trust`
+  # manually inside the new worktree.
+  defp maybe_propagate_trust(root, worktree_dir, was_trusted) do
+    ctx = %{root: root, worktree_dir: worktree_dir, was_trusted: was_trusted}
+
+    case Hooks.run(:post_init, ctx) do
+      :ok ->
+        :ok
+
+      {:error, msg} ->
+        IO.write(:stderr, "warning: #{msg}\n")
+        :ok
+    end
+  end
 end

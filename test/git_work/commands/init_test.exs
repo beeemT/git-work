@@ -144,4 +144,41 @@ defmodule GitWork.Commands.InitTest do
 
     assert upstream =~ "origin/main"
   end
+  test "propagates mise trust to worktree when source was trusted", %{tmp: tmp} do
+    repo = GitWork.TestHelper.create_normal_repo(tmp)
+    GitWork.TestHelper.write_trust_check_script(tmp, true)
+    GitWork.TestHelper.prepend_path(tmp)
+
+    File.cd!(repo)
+
+    assert {:ok, main_path} = Init.run([], :text)
+    # .mise-hook-trusted is written by fake `mise trust` (not --show),
+    # proving trust was actively applied to the worktree.
+    assert File.regular?(Path.join(main_path, ".mise-hook-trusted"))
+  end
+
+  test "does not run mise trust when source was not trusted", %{tmp: tmp} do
+    repo = GitWork.TestHelper.create_normal_repo(tmp)
+    GitWork.TestHelper.write_trust_check_script(tmp, false)
+    GitWork.TestHelper.prepend_path(tmp)
+
+    File.cd!(repo)
+
+    assert {:ok, main_path} = Init.run([], :text)
+    refute File.regular?(Path.join(main_path, ".mise-hook-trusted"))
+  end
+
+  test "respects git-work.hooks.mise.trust false config", %{tmp: tmp} do
+    repo = GitWork.TestHelper.create_normal_repo(tmp)
+    GitWork.TestHelper.write_trust_check_script(tmp, true)
+    GitWork.TestHelper.prepend_path(tmp)
+
+    # Set in .git/config now; it becomes .bare/config after init renames .git/ -> .bare/
+    System.cmd("git", ["config", "git-work.hooks.mise.trust", "false"], cd: repo)
+
+    File.cd!(repo)
+
+    assert {:ok, main_path} = Init.run([], :text)
+    refute File.regular?(Path.join(main_path, ".mise-hook-trusted"))
+  end
 end

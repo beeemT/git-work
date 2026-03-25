@@ -161,4 +161,47 @@ defmodule GitWork.TestHelper do
     current = System.get_env("PATH") || ""
     System.put_env("PATH", base_dir <> ":" <> current)
   end
+  @doc """
+  Write a fake mise script that simulates a trusted or untrusted source.
+  `trusted?` controls what `mise trust --show` reports.
+  `mise trust` (the apply step) writes `.mise-hook-trusted` in CWD rather than
+  `.trusted`, so tests can prove trust was explicitly propagated — not just that
+  a file happened to move there from the original repo directory.
+  `mise tasks` returns an empty list (no worktree-setup task).
+  """
+  def write_trust_check_script(base_dir, trusted?) do
+    script = Path.join(base_dir, "mise")
+    show_cmd = if trusted?, do: "echo trusted", else: "true"
+
+    File.write!(script, """
+    #!/bin/sh
+    cmd="$1"
+    shift || true
+
+    case "$cmd" in
+      trust)
+        if [ "${1:-}" = "--show" ]; then
+          #{show_cmd}
+          exit 0
+        fi
+        touch .mise-hook-trusted
+        exit 0
+        ;;
+      tasks)
+        echo '[]'
+        exit 0
+        ;;
+      run)
+        exit 0
+        ;;
+      *)
+        echo "unknown mise command" >&2
+        exit 1
+        ;;
+    esac
+    """)
+
+    File.chmod!(script, 0o755)
+  end
+
 end
