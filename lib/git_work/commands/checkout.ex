@@ -10,7 +10,7 @@ defmodule GitWork.Commands.Checkout do
     """
     usage: git-work checkout <branch>
            git-work checkout -
-           git-work checkout -b <branch>
+           git-work checkout -b <branch> [<base>]
 
     Switch to a branch by navigating to its worktree directory.
 
@@ -19,9 +19,10 @@ defmodule GitWork.Commands.Checkout do
     exists, a new worktree is automatically created tracking the remote branch.
     Returns an error only if neither a worktree nor a remote branch is found.
 
-    With -b, creates a new worktree for the given branch (tracking the remote
-    branch if one exists, or creating a new local branch otherwise). Returns
-    an error if a worktree for that branch already exists.
+    With -b, creates a new worktree for the given branch. An optional <base>
+    ref sets the starting point; if omitted, the current worktree's HEAD is
+    used (falling back to the default branch when run from the project root).
+    Returns an error if a worktree for that branch already exists.
 
     Supports fuzzy matching against existing worktrees:
       - Substring: 'login' matches 'feature-login'
@@ -35,7 +36,8 @@ defmodule GitWork.Commands.Checkout do
       git-work checkout -                # switch to previous branch
       git-work checkout login            # fuzzy match existing worktree
       git-work checkout feature/remote   # auto-create from remote branch
-      git-work checkout -b feature/new   # create new worktree
+      git-work checkout -b feature/new              # new worktree from current HEAD
+      git-work checkout -b feature/new origin/main  # new worktree based on origin/main
     """
   end
 
@@ -44,8 +46,9 @@ defmodule GitWork.Commands.Checkout do
       ["-b", branch] ->
         with {:ok, root} <- Project.find_root() do
           source = current_worktree(root, File.cwd!())
+          base = resolve_default_base(root, source)
 
-          do_create(root, branch)
+          do_create(root, branch, base)
           |> track_checkout(root, source)
         end
 
@@ -66,8 +69,21 @@ defmodule GitWork.Commands.Checkout do
           |> track_checkout(root, source)
         end
 
+      ["-b", branch, base] ->
+        with {:ok, root} <- Project.find_root() do
+          source = current_worktree(root, File.cwd!())
+
+          if branch_exists?(root, branch) do
+            {:error,
+             "branch '#{branch}' already exists; omit base ref '#{base}' to check it out"}
+          else
+            do_create(root, branch, base)
+            |> track_checkout(root, source)
+          end
+        end
+
       _ ->
-        {:error, "usage: git-work checkout [-b] <branch>"}
+        {:error, "usage: git-work checkout [-b] <branch> [<base>]"}
     end
   end
 
@@ -182,18 +198,18 @@ defmodule GitWork.Commands.Checkout do
     end
   end
 
-  defp do_create(root, input) do
+  defp do_create(root, input, base) do
     existing = Project.worktree_dirs(root)
     sanitized = Project.sanitize_branch(input)
 
     if sanitized in existing do
       {:error, "worktree '#{sanitized}' already exists"}
     else
-      create_worktree(root, input, sanitized)
+      create_worktree(root, input, sanitized, base)
     end
   end
 
-  defp create_worktree(root, branch, dir_name) do
+  defp create_worktree(root, branch, dir_name, base \\ nil) do
     bare_dir = Project.bare_path(root)
     worktree_dir = Path.join(root, dir_name)
 
@@ -213,8 +229,11 @@ defmodule GitWork.Commands.Checkout do
             end
 
           {:error, _} ->
-            # Brand new branch
-            case Git.cmd(["worktree", "add", "-b", branch, worktree_dir], cd: bare_dir) do
+            # Brand new branch — append base when provided; nil lets git use bare HEAD
+            git_cmd = ["worktree", "add", "-b", branch, worktree_dir]
+            git_cmd = if base, do: git_cmd ++ [base], else: git_cmd
+
+            case Git.cmd(git_cmd, cd: bare_dir) do
               {:ok, _} ->
                 run_hooks(root, worktree_dir, branch)
 
@@ -236,6 +255,41 @@ defmodule GitWork.Commands.Checkout do
       {:error, msg} ->
         {:error, "failed to check remote branches: #{msg}"}
     end
+  end
+
+  # Returns the HEAD SHA of the given worktree to use as the default base for
+  # a new branch. Returns nil when source is nil (running from the project root
+  # or outside a worktree), which causes git to fall back to the bare repo HEAD
+  # (the default branch, typically main).
+  defp resolve_default_base(_root, nil), do: nil
+
+  defp resolve_default_base(root, source) do
+    case Git.cmd(["rev-parse", "HEAD"], cd: Path.join(root, source)) do
+      {:ok, sha} -> sha
+      {:error, _} -> nil
+    end
+  end
+
+  # Returns true when a branch already exists locally or on origin. Used to
+  # guard against silently ignoring an explicit base ref: if the branch exists,
+  # git would check it out and ignore the base — error instead.
+  defp branch_exists?(root, branch) do
+    bare_dir = Project.bare_path(root)
+
+    remote =
+      case Git.cmd(["branch", "-r", "--list", "origin/#{branch}"], cd: bare_dir) do
+        {:ok, ""} -> false
+        {:ok, _} -> true
+        {:error, _} -> false
+      end
+
+    local =
+      case Git.cmd(["show-ref", "--verify", "refs/heads/#{branch}"], cd: bare_dir) do
+        {:ok, _} -> true
+        {:error, _} -> false
+      end
+
+    remote || local
   end
 
   defp run_hooks(root, worktree_dir, branch) do

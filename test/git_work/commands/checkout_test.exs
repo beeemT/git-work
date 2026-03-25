@@ -234,4 +234,82 @@ defmodule GitWork.Commands.CheckoutTest do
     assert File.dir?(path)
     refute File.regular?(Path.join(path, "hook-ran"))
   end
+
+  test "checkout -b with explicit local branch as base starts from that branch", %{tmp: tmp} do
+    project = GitWork.TestHelper.create_gw_project(tmp)
+    bare = Path.join(project, ".bare")
+
+    # Create a side branch and advance it past main with a new commit
+    File.cd!(Path.join(project, "main"))
+    {:ok, side_path} = Checkout.run(["-b", "side"], :text)
+    File.write!(Path.join(side_path, "side.txt"), "side content")
+    System.cmd("git", ["add", "."], cd: side_path)
+    System.cmd("git", ["-c", "user.name=Test", "-c", "user.email=test@test.com",
+      "commit", "-m", "side commit"], cd: side_path)
+
+    # Create a child branch from "side" while sitting in a different worktree
+    File.cd!(Path.join(project, "main"))
+    assert {:ok, path} = Checkout.run(["-b", "child-branch", "side"], :text)
+    assert File.dir?(path)
+
+    {child_sha, 0} = System.cmd("git", ["rev-parse", "child-branch"], cd: bare)
+    {side_sha, 0} = System.cmd("git", ["rev-parse", "side"], cd: bare)
+    assert String.trim(child_sha) == String.trim(side_sha)
+  end
+
+  test "checkout -b with origin/main as base creates branch from remote HEAD", %{tmp: tmp} do
+    origin = GitWork.TestHelper.create_origin_repo(tmp)
+    project = Path.join(tmp, "project")
+    {:ok, _} = GitWork.Commands.Clone.run([origin, project], :text)
+
+    {_, 0} =
+      System.cmd("git", ["config", "git-work.hooks.mise.task", ""],
+        cd: Path.join(project, ".bare")
+      )
+
+    File.cd!(Path.join(project, "main"))
+
+    assert {:ok, path} = Checkout.run(["-b", "feature-from-remote", "origin/main"], :text)
+    assert File.dir?(path)
+
+    bare = Path.join(project, ".bare")
+    {child_sha, 0} = System.cmd("git", ["rev-parse", "feature-from-remote"], cd: bare)
+    {origin_sha, 0} = System.cmd("git", ["rev-parse", "origin/main"], cd: bare)
+    assert String.trim(child_sha) == String.trim(origin_sha)
+  end
+
+  test "checkout -b with explicit base errors when branch already exists", %{tmp: tmp} do
+    project = GitWork.TestHelper.create_gw_project(tmp)
+
+    File.cd!(Path.join(project, "main"))
+
+    assert {:error, msg} = Checkout.run(["-b", "main", "some-base"], :text)
+    assert msg =~ "already exists"
+    assert msg =~ "base ref"
+  end
+
+  test "checkout -b without explicit base uses current worktree HEAD", %{tmp: tmp} do
+    project = GitWork.TestHelper.create_gw_project(tmp)
+    bare = Path.join(project, ".bare")
+
+    # Create a side branch and advance it past main
+    File.cd!(Path.join(project, "main"))
+    {:ok, side_path} = Checkout.run(["-b", "side"], :text)
+    File.write!(Path.join(side_path, "side.txt"), "side content")
+    System.cmd("git", ["add", "."], cd: side_path)
+    System.cmd("git", ["-c", "user.name=Test", "-c", "user.email=test@test.com",
+      "commit", "-m", "side commit"], cd: side_path)
+
+    # From inside the side worktree, create a new branch with no explicit base
+    File.cd!(side_path)
+    assert {:ok, path} = Checkout.run(["-b", "child-branch"], :text)
+    assert File.dir?(path)
+
+    {child_sha, 0} = System.cmd("git", ["rev-parse", "child-branch"], cd: bare)
+    {side_sha, 0} = System.cmd("git", ["rev-parse", "side"], cd: bare)
+    {main_sha, 0} = System.cmd("git", ["rev-parse", "main"], cd: bare)
+    # child-branch must start from side's HEAD, not main's (they differ by the extra commit)
+    assert String.trim(child_sha) == String.trim(side_sha)
+    refute String.trim(child_sha) == String.trim(main_sha)
+  end
 end
