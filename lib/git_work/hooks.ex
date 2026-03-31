@@ -46,8 +46,12 @@ defmodule GitWork.Hooks do
 
       _path ->
         case cmd("mise", ["trust", "--show"], cd: dir) do
-          {:ok, output} when output != "" -> true
-          _ -> false
+          # mise trust --show always emits "path: trusted" or "path: untrusted"
+          # (non-empty in both cases), so we must check the content, not just
+          # presence. "untrusted" is a superstring of "trusted", so the negative
+          # guard is required.
+          {:ok, output} ->
+            String.contains?(output, "trusted") and not String.contains?(output, "untrusted")
         end
     end
   end
@@ -75,14 +79,15 @@ defmodule GitWork.Hooks do
 
   defp maybe_trust_mise(true, %{source_worktree: source, worktree_dir: worktree_dir}) do
     case cmd("mise", ["trust", "--show"], cd: source) do
-      {:ok, output} when output != "" ->
-        case cmd("mise", ["trust"], cd: worktree_dir) do
-          {:ok, _} -> :ok
-          {:error, msg} -> {:error, "mise trust failed: #{msg}"}
+      {:ok, output} ->
+        if String.contains?(output, "trusted") and not String.contains?(output, "untrusted") do
+          case cmd("mise", ["trust"], cd: worktree_dir) do
+            {:ok, _} -> :ok
+            {:error, msg} -> {:error, "mise trust failed: #{msg}"}
+          end
+        else
+          :ok
         end
-
-      {:ok, _} ->
-        :ok
 
       {:error, msg} ->
         {:error, "mise trust --show failed: #{msg}"}

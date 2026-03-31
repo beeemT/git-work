@@ -312,4 +312,43 @@ defmodule GitWork.Commands.CheckoutTest do
     assert String.trim(child_sha) == String.trim(side_sha)
     refute String.trim(child_sha) == String.trim(main_sha)
   end
+
+  test "trust not propagated to new worktree when source is untrusted", %{tmp: tmp} do
+    project = GitWork.TestHelper.create_gw_project(tmp)
+    bare = Path.join(project, ".bare")
+
+    GitWork.TestHelper.write_hook_script(tmp)
+    GitWork.TestHelper.prepend_path(tmp)
+
+    # Note: no .trusted written to main — source is untrusted
+    {_, 0} = System.cmd("git", ["config", "git-work.hooks.mise.task", ""], cd: bare)
+
+    File.cd!(Path.join(project, "main"))
+
+    assert {:ok, path} = Checkout.run(["-b", "feature-no-trust"], :text)
+    refute File.regular?(Path.join(path, ".trusted"))
+  end
+
+  test "trust propagated when auto-creating worktree from trusted remote branch", %{tmp: tmp} do
+    origin = GitWork.TestHelper.create_origin_repo(tmp)
+    project = Path.join(tmp, "project")
+    {:ok, _} = GitWork.Commands.Clone.run([origin, project], :text)
+    bare = Path.join(project, ".bare")
+
+    GitWork.TestHelper.write_hook_script(tmp)
+    GitWork.TestHelper.prepend_path(tmp)
+
+    {_, 0} = System.cmd("git", ["config", "git-work.hooks.mise.task", ""], cd: bare)
+
+    # Trust the source worktree
+    File.write!(Path.join([project, "main", ".trusted"]), "ok")
+
+    GitWork.TestHelper.create_remote_branch(origin, "feature-trust-remote")
+    System.cmd("git", ["fetch", "--all"], cd: bare)
+
+    File.cd!(Path.join(project, "main"))
+
+    assert {:ok, path} = Checkout.run(["feature-trust-remote"], :text)
+    assert File.regular?(Path.join(path, ".trusted"))
+  end
 end
