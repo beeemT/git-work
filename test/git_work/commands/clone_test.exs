@@ -74,4 +74,16 @@ defmodule GitWork.Commands.CloneTest do
     assert {:error, msg} = Clone.run([origin, project], :text)
     assert msg =~ "already exists"
   end
+
+  test "clone sets push.autoSetupRemote on bare repo", %{tmp: tmp} do
+    origin = GitWork.TestHelper.create_origin_repo(tmp)
+    project = Path.join(tmp, "project")
+
+    assert {:ok, _} = Clone.run([origin, project], :text)
+
+    {auto_setup, 0} =
+      System.cmd("git", ["config", "push.autoSetupRemote"], cd: Path.join(project, ".bare"))
+
+    assert String.trim(auto_setup) == "true"
+  end
 end

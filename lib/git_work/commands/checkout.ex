@@ -302,6 +302,7 @@ defmodule GitWork.Commands.Checkout do
 
     case Hooks.run(:post_worktree_create, ctx) do
       :ok ->
+        Project.ensure_upstream(worktree_dir, branch)
         {:ok, worktree_dir}
 
       {:error, msg} ->

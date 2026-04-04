@@ -48,9 +48,9 @@ defmodule GitWork.Commands.Clone do
            {:ok, branch} <- detect_head_branch(bare_dir),
            :ok <- fix_head(bare_dir, branch),
            :ok <- add_main_worktree(dir, branch),
-           :ok <- configure_bare(bare_dir),
+           :ok <- Project.configure_bare(bare_dir),
            :ok <- fetch_refs(bare_dir),
-           :ok <- ensure_upstream(dir, branch) do
+           :ok <- Project.ensure_upstream(Path.join(dir, branch), branch) do
         {:ok, Path.join(dir, branch)}
       end
     end
@@ -67,16 +67,6 @@ defmodule GitWork.Commands.Clone do
     File.write(Path.join(dir, ".git"), "gitdir: ./.bare\n")
   end
 
-  defp configure_bare(bare_dir) do
-    with {:ok, _} <- Git.cmd(["config", "core.bare", "true"], cd: bare_dir),
-         {:ok, _} <-
-           Git.cmd(
-             ["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"],
-             cd: bare_dir
-           ) do
-      :ok
-    end
-  end
 
   defp fetch_refs(bare_dir) do
     case Git.cmd(["fetch", "--all"], cd: bare_dir) do
@@ -135,32 +125,4 @@ defmodule GitWork.Commands.Clone do
     end
   end
 
-  defp ensure_upstream(dir, branch) do
-    worktree_dir = Path.join(dir, branch)
-
-    case Git.cmd(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], cd: worktree_dir) do
-      {:ok, _} ->
-        :ok
-
-      {:error, _} ->
-        case Git.cmd(["show-ref", "--verify", "--quiet", "refs/remotes/origin/#{branch}"],
-               cd: worktree_dir
-             ) do
-          {:ok, _} ->
-            case Git.cmd(["branch", "--set-upstream-to=origin/#{branch}", branch],
-                   cd: worktree_dir
-                 ) do
-              {:ok, _} ->
-                :ok
-
-              {:error, msg} ->
-                IO.write(:stderr, "warning: failed to set upstream for #{branch}: #{msg}\n")
-                :ok
-            end
-
-          {:error, _} ->
-            :ok
-        end
-    end
-  end
 end

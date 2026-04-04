@@ -351,4 +351,73 @@ defmodule GitWork.Commands.CheckoutTest do
     assert {:ok, path} = Checkout.run(["feature-trust-remote"], :text)
     assert File.regular?(Path.join(path, ".trusted"))
   end
+
+  test "checkout auto-create from remote sets upstream tracking", %{tmp: tmp} do
+    origin = GitWork.TestHelper.create_origin_repo(tmp)
+    project = Path.join(tmp, "project")
+    {:ok, _} = GitWork.Commands.Clone.run([origin, project], :text)
+
+    {_, 0} =
+      System.cmd("git", ["config", "git-work.hooks.mise.task", ""],
+        cd: Path.join(project, ".bare")
+      )
+
+    GitWork.TestHelper.create_remote_branch(origin, "feature-tracking")
+    System.cmd("git", ["fetch", "--all"], cd: Path.join(project, ".bare"))
+
+    File.cd!(Path.join(project, "main"))
+
+    # Auto-create worktree from remote branch (no -b)
+    assert {:ok, path} = Checkout.run(["feature-tracking"], :text)
+    assert File.dir?(path)
+
+    # Upstream tracking should be set to the remote branch
+    {upstream, 0} =
+      System.cmd("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        cd: path
+      )
+
+    assert String.trim(upstream) == "origin/feature-tracking"
+  end
+
+  test "checkout -b new branch has push.autoSetupRemote configured", %{tmp: tmp} do
+    origin = GitWork.TestHelper.create_origin_repo(tmp)
+    project = Path.join(tmp, "project")
+    {:ok, _} = GitWork.Commands.Clone.run([origin, project], :text)
+
+    {_, 0} =
+      System.cmd("git", ["config", "git-work.hooks.mise.task", ""],
+        cd: Path.join(project, ".bare")
+      )
+
+    File.cd!(Path.join(project, "main"))
+
+    assert {:ok, path} = Checkout.run(["-b", "feature-fresh"], :text)
+    assert File.dir?(path)
+
+    # push.autoSetupRemote should be set on the bare repo so that
+    # `git push` from any worktree automatically sets upstream tracking
+    {auto_setup, 0} =
+      System.cmd("git", ["config", "push.autoSetupRemote"], cd: Path.join(project, ".bare"))
+
+    assert String.trim(auto_setup) == "true"
+
+    # New branch has no upstream yet (nothing on remote)
+    {_, exit_code} =
+      System.cmd("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        cd: path
+      )
+
+    assert exit_code != 0
+
+    # Default push with autoSetupRemote — should set upstream automatically
+    {_, 0} = System.cmd("git", ["push"], cd: path)
+
+    {upstream, 0} =
+      System.cmd("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        cd: path
+      )
+
+    assert String.trim(upstream) == "origin/feature-fresh"
+  end
 end

@@ -65,7 +65,7 @@ defmodule GitWork.Commands.Init do
 
   defp do_repair(dir, git_dir, bare_dir) do
     with :ok <- ensure_gitdir_pointer(dir, git_dir),
-         :ok <- configure_bare(bare_dir),
+         :ok <- Project.configure_bare(bare_dir),
          {:ok, branch} <- Project.head_branch(dir),
          :ok <- ensure_worktree_dir(dir, branch) do
       {:ok, Project.worktree_path(dir, branch)}
@@ -119,12 +119,12 @@ defmodule GitWork.Commands.Init do
 
   defp do_init_steps(dir, branch, stashed?, git_dir, bare_dir) do
     with :ok <- move_git_to_bare(git_dir, bare_dir),
-         :ok <- configure_bare(bare_dir),
+         :ok <- Project.configure_bare(bare_dir),
          :ok <- move_files_to_worktree(dir, branch),
          :ok <- setup_worktree_linkage(dir, branch),
          :ok <- write_gitdir_pointer(dir),
          :ok <- reset_worktree_index(dir, branch),
-         :ok <- ensure_upstream(dir, branch),
+         :ok <- Project.ensure_upstream(Path.join(dir, branch), branch),
          :ok <- validate_init(dir, branch, bare_dir),
          :ok <- maybe_pop_stash(dir, branch, stashed?) do
       :ok
@@ -165,27 +165,6 @@ defmodule GitWork.Commands.Init do
     case File.write(Path.join(dir, ".git"), "gitdir: ./.bare\n") do
       :ok -> :ok
       {:error, reason} -> {:error, "failed to write .git pointer: #{reason}"}
-    end
-  end
-
-  defp configure_bare(bare_dir) do
-    with {:ok, _} <- Git.cmd(["config", "core.bare", "true"], cd: bare_dir) do
-      # Only set fetch refspec if remote origin exists
-      case Git.cmd(["remote", "get-url", "origin"], cd: bare_dir) do
-        {:ok, _} ->
-          Git.cmd(
-            ["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"],
-            cd: bare_dir
-          )
-          |> case do
-            {:ok, _} -> :ok
-            {:error, msg} -> {:error, "failed to configure fetch: #{msg}"}
-          end
-
-        {:error, _} ->
-          IO.write(:stderr, "warning: no remote 'origin' configured\n")
-          :ok
-      end
     end
   end
 
@@ -249,36 +228,6 @@ defmodule GitWork.Commands.Init do
     end
   end
 
-  defp ensure_upstream(dir, branch) do
-    worktree_dir = Path.join(dir, branch)
-
-    case Git.cmd(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-           cd: worktree_dir
-         ) do
-      {:ok, _} ->
-        :ok
-
-      {:error, _} ->
-        case Git.cmd(["show-ref", "--verify", "--quiet", "refs/remotes/origin/#{branch}"],
-               cd: worktree_dir
-             ) do
-          {:ok, _} ->
-            case Git.cmd(["branch", "--set-upstream-to=origin/#{branch}", branch],
-                   cd: worktree_dir
-                 ) do
-              {:ok, _} ->
-                :ok
-
-              {:error, msg} ->
-                IO.write(:stderr, "warning: failed to set upstream for #{branch}: #{msg}\n")
-                :ok
-            end
-
-          {:error, _} ->
-            :ok
-        end
-    end
-  end
 
   defp validate_init(dir, branch, bare_dir) do
     worktree_dir = Path.join(dir, branch)

@@ -1,7 +1,10 @@
 defmodule GitWork.Project do
   @moduledoc """
-  Project root discovery, path helpers, and branch name sanitization.
+  Project root discovery, path helpers, branch name sanitization,
+  and shared configuration for bare repos and worktrees.
   """
+
+  alias GitWork.Git
 
   @doc """
   Find the project root by walking up from `start_dir` looking for `.bare/`.
@@ -74,6 +77,66 @@ defmodule GitWork.Project do
     case GitWork.Git.cmd(["symbolic-ref", "--short", "HEAD"], cd: bare_path(project_root)) do
       {:ok, branch} -> {:ok, branch}
       {:error, _} -> {:error, "could not determine HEAD branch"}
+    end
+  end
+
+  @doc """
+  Configure the bare repo: mark as bare, enable push.autoSetupRemote,
+  and set the fetch refspec for origin (if origin exists).
+  """
+  def configure_bare(bare_dir) do
+    with {:ok, _} <- Git.cmd(["config", "core.bare", "true"], cd: bare_dir),
+         {:ok, _} <- Git.cmd(["config", "push.autoSetupRemote", "true"], cd: bare_dir) do
+      # Only set fetch refspec if remote origin exists
+      case Git.cmd(["remote", "get-url", "origin"], cd: bare_dir) do
+        {:ok, _} ->
+          case Git.cmd(
+                 ["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"],
+                 cd: bare_dir
+               ) do
+            {:ok, _} -> :ok
+            {:error, msg} -> {:error, "failed to configure fetch: #{msg}"}
+          end
+
+        {:error, _} ->
+          IO.write(:stderr, "warning: no remote 'origin' configured\n")
+          :ok
+      end
+    end
+  end
+
+  @doc """
+  Set upstream tracking for a branch if its remote counterpart exists.
+  No-ops when the branch has no remote ref (e.g. brand-new, not yet pushed).
+  """
+  def ensure_upstream(worktree_dir, branch) do
+    case Git.cmd(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+           cd: worktree_dir
+         ) do
+      {:ok, _} ->
+        # Already has upstream tracking
+        :ok
+
+      {:error, _} ->
+        case Git.cmd(["show-ref", "--verify", "--quiet", "refs/remotes/origin/#{branch}"],
+               cd: worktree_dir
+             ) do
+          {:ok, _} ->
+            case Git.cmd(["branch", "--set-upstream-to=origin/#{branch}", branch],
+                   cd: worktree_dir
+                 ) do
+              {:ok, _} ->
+                :ok
+
+              {:error, msg} ->
+                IO.write(:stderr, "warning: failed to set upstream for #{branch}: #{msg}\n")
+                :ok
+            end
+
+          {:error, _} ->
+            # No remote ref — nothing to track (will be set on first push via autoSetupRemote)
+            :ok
+        end
     end
   end
 end

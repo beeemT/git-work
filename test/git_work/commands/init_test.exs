@@ -69,6 +69,12 @@ defmodule GitWork.Commands.InitTest do
       System.cmd("git", ["config", "--bool", "core.bare"], cd: Path.join(repo, ".bare"))
 
     assert String.trim(value) == "true"
+
+    # push.autoSetupRemote should be set by repair
+    {auto_setup, 0} =
+      System.cmd("git", ["config", "push.autoSetupRemote"], cd: Path.join(repo, ".bare"))
+
+    assert String.trim(auto_setup) == "true"
   end
 
   test "recreates missing HEAD worktree on rerun", %{tmp: tmp} do
