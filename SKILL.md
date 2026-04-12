@@ -1,3 +1,8 @@
+---
+name: git-work
+description: Opinionated git worktree helper that makes worktrees work like branches.
+---
+
 # git-work
 
 `git-work` is a CLI that wraps `git worktree` into a branch-per-directory workflow. Each branch lives in its own subdirectory. Context-switching is `cd`, not `git checkout`.
