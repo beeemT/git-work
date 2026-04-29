@@ -48,7 +48,7 @@ defmodule GitWork.Commands.Checkout do
           source = current_worktree(root, File.cwd!())
           base = resolve_default_base(root, source)
 
-          do_create(root, branch, base)
+          do_create(root, branch, base, source)
           |> track_checkout(root, source)
         end
 
@@ -77,7 +77,7 @@ defmodule GitWork.Commands.Checkout do
             {:error,
              "branch '#{branch}' already exists; omit base ref '#{base}' to check it out"}
           else
-            do_create(root, branch, base)
+            do_create(root, branch, base, source)
             |> track_checkout(root, source)
           end
         end
@@ -113,7 +113,7 @@ defmodule GitWork.Commands.Checkout do
 
           {:ok, _} ->
             IO.write(:stderr, "creating worktree from remote branch: '#{input}'\n")
-            create_worktree(root, input, sanitized)
+            create_worktree(root, input, sanitized, nil, nil)
 
           {:error, _} ->
             {:error, "no worktree found for '#{input}' (use -b to create one)"}
@@ -198,18 +198,18 @@ defmodule GitWork.Commands.Checkout do
     end
   end
 
-  defp do_create(root, input, base) do
+  defp do_create(root, input, base, source) do
     existing = Project.worktree_dirs(root)
     sanitized = Project.sanitize_branch(input)
 
     if sanitized in existing do
       {:error, "worktree '#{sanitized}' already exists"}
     else
-      create_worktree(root, input, sanitized, base)
+      create_worktree(root, input, sanitized, base, source)
     end
   end
 
-  defp create_worktree(root, branch, dir_name, base \\ nil) do
+  defp create_worktree(root, branch, dir_name, base, source) do
     bare_dir = Project.bare_path(root)
     worktree_dir = Path.join(root, dir_name)
 
@@ -222,7 +222,7 @@ defmodule GitWork.Commands.Checkout do
             # Local branch exists
             case Git.cmd(["worktree", "add", worktree_dir, branch], cd: bare_dir) do
               {:ok, _} ->
-                run_hooks(root, worktree_dir, branch)
+                run_hooks(root, worktree_dir, branch, nil, source)
 
               {:error, msg} ->
                 {:error, "worktree add failed: #{msg}"}
@@ -235,7 +235,7 @@ defmodule GitWork.Commands.Checkout do
 
             case Git.cmd(git_cmd, cd: bare_dir) do
               {:ok, _} ->
-                run_hooks(root, worktree_dir, branch)
+                run_hooks(root, worktree_dir, branch, base, source)
 
               {:error, msg} ->
                 {:error, "worktree add failed: #{msg}"}
@@ -246,7 +246,7 @@ defmodule GitWork.Commands.Checkout do
         # Remote branch exists — track it
         case Git.cmd(["worktree", "add", worktree_dir, branch], cd: bare_dir) do
           {:ok, _} ->
-            run_hooks(root, worktree_dir, branch)
+            run_hooks(root, worktree_dir, branch, base, source)
 
           {:error, msg} ->
             {:error, "worktree add failed: #{msg}"}
@@ -292,12 +292,33 @@ defmodule GitWork.Commands.Checkout do
     remote || local
   end
 
-  defp run_hooks(root, worktree_dir, branch) do
+  defp run_hooks(root, worktree_dir, branch, base, source) do
+    # When source is nil (running from project root), derive source_branch from
+    # base: if base is a simple branch name (no /), use it; otherwise read bare HEAD.
+    source_branch =
+      case source do
+        nil ->
+          if base && !String.contains?(base, "/") do
+            base
+          else
+            default_branch_from_bare(root)
+          end
+
+        branch ->
+          branch
+      end
+
+    # Derive source_worktree from root and source_branch for consistency.
+    # Using cwd can be wrong on macOS where /var -> /private/var symlinks cause
+    # Path.join(root, source_branch) and cwd to diverge.
+    source_worktree = Path.join(root, source_branch)
+
     ctx = %{
       root: root,
       worktree_dir: worktree_dir,
       branch: branch,
-      source_worktree: File.cwd!()
+      source_worktree: source_worktree,
+      source_branch: source_branch
     }
 
     case Hooks.run(:post_worktree_create, ctx) do
@@ -307,6 +328,16 @@ defmodule GitWork.Commands.Checkout do
 
       {:error, msg} ->
         rollback_worktree(root, worktree_dir, branch, msg)
+    end
+  end
+
+  # Read the default branch name from the bare repo's HEAD symbolic-ref.
+  defp default_branch_from_bare(root) do
+    bare_dir = Project.bare_path(root)
+
+    case Git.cmd(["symbolic-ref", "--short", "HEAD"], cd: bare_dir) do
+      {:ok, branch} -> String.trim(branch)
+      {:error, _} -> "main"
     end
   end
 

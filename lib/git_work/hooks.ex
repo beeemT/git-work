@@ -75,9 +75,27 @@ defmodule GitWork.Hooks do
 
   defp maybe_trust_mise(false, _ctx), do: :ok
 
-  defp maybe_trust_mise(true, %{source_worktree: nil}), do: :ok
+  # When source_worktree is nil (running from project root), use the project
+  # root itself as the trust source — it is the main branch's worktree.
+  defp maybe_trust_mise(true, %{source_worktree: nil, source_branch: nil, root: root, worktree_dir: worktree_dir}) do
+    trust_from_source(root, worktree_dir)
+  end
+
+  defp maybe_trust_mise(true, %{source_worktree: nil, source_branch: branch, root: root, worktree_dir: worktree_dir}) do
+    source = Path.join(root, branch)
+
+    if File.dir?(source) do
+      trust_from_source(source, worktree_dir)
+    else
+      :ok
+    end
+  end
 
   defp maybe_trust_mise(true, %{source_worktree: source, worktree_dir: worktree_dir}) do
+    trust_from_source(source, worktree_dir)
+  end
+
+  defp trust_from_source(source, worktree_dir) do
     case cmd("mise", ["trust", "--show"], cd: source) do
       {:ok, output} ->
         if String.contains?(output, "trusted") and not String.contains?(output, "untrusted") do

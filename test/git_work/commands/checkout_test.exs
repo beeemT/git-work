@@ -352,6 +352,25 @@ defmodule GitWork.Commands.CheckoutTest do
     assert File.regular?(Path.join(path, ".trusted"))
   end
 
+  test "trust propagated from project root when source branch worktree is trusted", %{tmp: tmp} do
+    project = GitWork.TestHelper.create_gw_project(tmp)
+    bare = Path.join(project, ".bare")
+
+    GitWork.TestHelper.write_hook_script(tmp)
+    GitWork.TestHelper.prepend_path(tmp)
+
+    {_, 0} = System.cmd("git", ["config", "git-work.hooks.mise.task", ""], cd: bare)
+
+    # Trust the main worktree
+    File.write!(Path.join([project, "main", ".trusted"]), "ok")
+
+    # Run checkout from project root (not from inside a worktree)
+    File.cd!(project)
+
+    assert {:ok, path} = Checkout.run(["-b", "feature-from-root"], :text)
+    assert File.regular?(Path.join(path, ".trusted"))
+  end
+
   test "checkout auto-create from remote sets upstream tracking", %{tmp: tmp} do
     origin = GitWork.TestHelper.create_origin_repo(tmp)
     project = Path.join(tmp, "project")
