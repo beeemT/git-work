@@ -117,7 +117,7 @@ defmodule GitWork.CLI do
     Commands:
       activate <shell>       Print shell integration (bash, zsh, fish)
       clone (cl) <url> [<dir>]    Clone a repo into worktree-based layout
-      init                        Convert current repo to worktree-based layout
+      init [--force]              Convert current repo to worktree-based layout
       checkout (co) <branch>      Switch to branch worktree (fuzzy match supported)
       rm [--force] [--yes] <branch>  Remove a worktree and its branch
       sync (s) [--dry-run]        Fetch and prune stale worktrees

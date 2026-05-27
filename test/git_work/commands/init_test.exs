@@ -187,4 +187,126 @@ defmodule GitWork.Commands.InitTest do
     assert {:ok, main_path} = Init.run([], :text)
     refute File.regular?(Path.join(main_path, ".mise-hook-trusted"))
   end
+
+  test "repair resets stale index showing files as deleted", %{tmp: tmp} do
+    # Simulate the user's scenario: files are physically deleted from the worktree
+    # (e.g. git clean -fd or manual deletion), causing git status to show all files
+    # as deleted. Running gw init should reset the index to match HEAD, clearing
+    # the stale "deleted" entries from the index so status shows clean (since
+    # the committed state matches the index — both say the files don't exist).
+    repo = GitWork.TestHelper.create_normal_repo(tmp)
+    File.cd!(repo)
+
+    assert {:ok, main_path} = Init.run([], :text)
+
+    # Physically delete tracked files from the worktree
+    File.rm!(Path.join(main_path, "README.md"))
+    File.rm!(Path.join(main_path, "src.ex"))
+
+    # Verify the corruption: git status shows deleted files (porcelain uses " D" for staged deletions)
+    {status_output, _} = System.cmd("git", ["status", "--porcelain"], cd: main_path)
+    assert status_output =~ "README.md"
+
+    # Repair with a second init run
+    assert {:ok, _} = Init.run([], :text)
+
+    # checkout-index -a -f restores deleted files from the index
+    assert File.regular?(Path.join(main_path, "README.md"))
+    assert File.regular?(Path.join(main_path, "src.ex"))
+
+    # git status should be clean
+    {status_output, _} = System.cmd("git", ["status", "--porcelain"], cd: main_path)
+    assert status_output == ""
+  end
+
+  test "repair fixes corrupted .git pointer file", %{tmp: tmp} do
+    repo = GitWork.TestHelper.create_normal_repo(tmp)
+    File.cd!(repo)
+
+    assert {:ok, _} = Init.run([], :text)
+
+    # Overwrite the .git pointer with garbage
+    File.write!(Path.join(repo, ".git"), "garbage content\n")
+
+    assert {:ok, _} = Init.run([], :text)
+
+    # .git pointer should be restored
+    assert File.read!(Path.join(repo, ".git")) == "gitdir: ./.bare\n"
+  end
+
+  test "--force allows repair when .git is a directory", %{tmp: tmp} do
+    repo = GitWork.TestHelper.create_normal_repo(tmp)
+    File.cd!(repo)
+
+    assert {:ok, _} = Init.run([], :text)
+
+    # Simulate corrupt state: .git exists as a directory
+    File.rm_rf!(Path.join(repo, ".git"))
+    File.mkdir!(Path.join(repo, ".git"))
+    # Put something inside so it looks like a real .git dir
+    File.write!(Path.join([repo, ".git", "config"]), "[core]\n")
+
+    # Without --force this should error
+    assert {:error, msg} = Init.run([], :text)
+    assert msg =~ ".git directory"
+
+    # With --force it should repair
+    assert {:ok, _} = Init.run(["--force"], :text)
+
+    # .git should be a pointer file again
+    assert File.regular?(Path.join(repo, ".git"))
+    assert File.read!(Path.join(repo, ".git")) == "gitdir: ./.bare\n"
+  end
+
+  test "repair re-registers unregistered worktree with --force", %{tmp: tmp} do
+    repo = GitWork.TestHelper.create_normal_repo(tmp)
+    File.cd!(repo)
+
+    assert {:ok, main_path} = Init.run([], :text)
+
+    # Remove the worktree metadata from the bare repo (but leave files intact)
+    worktree_meta = Path.join([repo, ".bare", "worktrees", "main"])
+    File.rm_rf!(worktree_meta)
+    # Also remove the .git pointer inside the worktree so git worktree add won't complain
+    File.rm!(Path.join([main_path, ".git"]))
+
+    # Without --force, repair fails with a helpful error
+    assert {:error, msg} = Init.run([], :text)
+    assert msg =~ "worktree is not registered"
+    assert msg =~ "--force"
+
+    # With --force, repair should detect the worktree is not registered and re-create it
+    assert {:ok, _} = Init.run(["--force"], :text)
+
+    # Worktree should be re-registered
+    {output, 0} = System.cmd("git", ["worktree", "list"], cd: Path.join(repo, ".bare"))
+    assert output =~ "main"
+
+    # git status should work cleanly (no deleted files)
+    {status_output, _} = System.cmd("git", ["status", "--porcelain"], cd: main_path)
+    assert status_output == ""
+  end
+
+  test "repair restores deleted files but silently destroys local modifications", %{tmp: tmp} do
+    repo = GitWork.TestHelper.create_normal_repo(tmp)
+    File.cd!(repo)
+
+    assert {:ok, main_path} = Init.run([], :text)
+
+    # Delete tracked files — git status shows them as "deleted" (stale index)
+    File.rm!(Path.join(main_path, "README.md"))
+    File.rm!(Path.join(main_path, "src.ex"))
+
+    # Also make an unstaged local modification to a different file
+    File.write!(Path.join(main_path, "README.md"), "# My local changes\n")
+
+    # Repair resets the index and runs checkout-index -a -f, which restores
+    # all tracked files from the index — overwriting the unstaged modification.
+    assert {:ok, _} = Init.run([], :text)
+
+    # Deleted files are restored
+    assert File.regular?(Path.join(main_path, "src.ex"))
+    # The unstaged local modification is overwritten by checkout-index
+    assert File.read!(Path.join(main_path, "README.md")) == "# Test\n"
+  end
 end
