@@ -1,6 +1,9 @@
 name: release
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
@@ -8,14 +11,16 @@ on:
         required: true
         type: string
 
-# The workflow is dispatched from the protected default branch. Build code from
-# the requested tag never receives repository write permissions.
+# Build code has read-only repository access. Publishing runs in a separate job.
 permissions:
   contents: read
 
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
 jobs:
   build:
-    if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+    if: ${{ (github.event_name == 'push' && !github.event.deleted) || github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -25,7 +30,7 @@ jobs:
       - name: Checkout requested tag
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: refs/tags/${{ inputs.tag }}
+          ref: refs/tags/${{ env.RELEASE_TAG }}
           fetch-depth: 0
           # The build job has only contents: read, so its persisted credential
           # cannot publish even if tag-controlled build code accesses Git.
@@ -34,7 +39,7 @@ jobs:
       - name: Verify release tag provenance
         id: verify_tag
         env:
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ env.RELEASE_TAG }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
@@ -79,7 +84,7 @@ jobs:
       - name: Build release asset
         run: mise run release:build
         env:
-          VERSION: ${{ inputs.tag }}
+          VERSION: ${{ env.RELEASE_TAG }}
 
       - name: Store release assets
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -89,7 +94,6 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -107,14 +111,14 @@ jobs:
       - name: Upload release assets
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          tag_name: ${{ inputs.tag }}
+          tag_name: ${{ env.RELEASE_TAG }}
           target_commitish: ${{ needs.build.outputs.tag_sha }}
           files: dist/*
 
       - name: Update Homebrew tap
         env:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          VERSION: ${{ inputs.tag }}
+          VERSION: ${{ env.RELEASE_TAG }}
         run: |
           set -euo pipefail
 

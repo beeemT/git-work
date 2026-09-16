@@ -262,7 +262,8 @@ mix escript.build
 
 ## Releases
 
-Run the `release` workflow from the default branch with an existing version tag, such as `v1.2.3`.
+Push a version tag, such as `v1.2.3`, to start the `release` workflow automatically.
+You can also run the workflow manually from the default branch with an existing version tag.
 The workflow builds the tag commit, not a branch with the same name.
 It verifies that the tag commit belongs to the default branch before the build.
 
