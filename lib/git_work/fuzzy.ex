@@ -56,7 +56,9 @@ defmodule GitWork.Fuzzy do
 
     scores =
       candidates
-      |> Enum.map(fn candidate -> {candidate, String.jaro_distance(down_input, String.downcase(candidate))} end)
+      |> Enum.map(fn candidate ->
+        {candidate, String.jaro_distance(down_input, String.downcase(candidate))}
+      end)
       |> Enum.filter(fn {_candidate, score} -> score >= @jaro_threshold end)
       |> Enum.sort_by(fn {_candidate, score} -> score end, :desc)
 

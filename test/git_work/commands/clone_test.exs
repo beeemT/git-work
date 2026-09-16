@@ -7,6 +7,7 @@ defmodule GitWork.Commands.CloneTest do
     old_cwd = File.cwd!()
     tmp = Path.join(System.tmp_dir!(), "gw_clone_test_#{System.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
+    {:ok, tmp} = GitWork.Project.canonical_directory_path(tmp)
 
     on_exit(fn ->
       File.cd!(old_cwd)
@@ -50,6 +51,41 @@ defmodule GitWork.Commands.CloneTest do
       )
 
     assert upstream =~ "origin/main"
+  end
+
+  test "clone creates missing nested destination parents", %{tmp: tmp} do
+    origin = GitWork.TestHelper.create_origin_repo(tmp)
+    project = Path.join([tmp, "nested", "parents", "project"])
+
+    assert {:ok, main_path} = Clone.run([origin, project], :text)
+    assert main_path == Path.join(project, "main")
+    assert File.dir?(Path.join(tmp, "nested"))
+    assert File.dir?(Path.join(project, ".bare"))
+  end
+
+  test "clone publishes physical paths for symlinked destination parents", %{tmp: tmp} do
+    origin = GitWork.TestHelper.create_origin_repo(tmp)
+    real_parent = Path.join(tmp, "real-parent")
+    symlink_parent = Path.join(tmp, "symlink-parent")
+    File.mkdir_p!(real_parent)
+    File.ln_s!(real_parent, symlink_parent)
+
+    lexical_project = Path.join([symlink_parent, "nested", "project"])
+    lexical_main = Path.join(lexical_project, "main")
+
+    assert {:ok, main_path} = Clone.run([origin, lexical_project], :text)
+    assert main_path != lexical_main
+    assert File.dir?(main_path)
+
+    {registry, 0} =
+      System.cmd(
+        "git",
+        ["worktree", "list", "--porcelain", "-z"],
+        cd: Path.join(Path.dirname(main_path), ".bare")
+      )
+
+    assert registry =~ "worktree #{main_path}\0"
+    refute registry =~ "worktree #{lexical_main}\0"
   end
 
   test "clone derives directory from URL", %{tmp: tmp} do

@@ -3,7 +3,7 @@ defmodule GitWork.Hooks do
   Hook runner for worktree lifecycle events.
   """
 
-  alias GitWork.{Git, Project}
+  alias GitWork.{Git, Output, Project}
 
   def run(:post_worktree_create, ctx) do
     run_mise_hook(ctx)
@@ -19,10 +19,7 @@ defmodule GitWork.Hooks do
 
       _path ->
         if was_trusted and mise_trust_enabled?(root) do
-          case cmd("mise", ["trust"], cd: worktree_dir) do
-            {:ok, _} -> :ok
-            {:error, msg} -> {:error, "mise trust failed: #{msg}"}
-          end
+          trust_dir(worktree_dir)
         else
           :ok
         end
@@ -45,21 +42,14 @@ defmodule GitWork.Hooks do
         false
 
       _path ->
-        case cmd("mise", ["trust", "--show"], cd: dir) do
-          # mise trust --show always emits "path: trusted" or "path: untrusted"
-          # (non-empty in both cases), so we must check the content, not just
-          # presence. "untrusted" is a superstring of "trusted", so the negative
-          # guard is required.
-          {:ok, output} ->
-            String.contains?(output, "trusted") and not String.contains?(output, "untrusted")
-        end
+        match?({:ok, :trusted}, trust_status(dir))
     end
   end
 
   defp run_mise_hook(%{root: root, worktree_dir: worktree_dir} = ctx) do
     case System.find_executable("mise") do
       nil ->
-        IO.write(:stderr, "hook: mise not found; skipping trust and task\n")
+        Output.notify(:info, "hook: mise not found; skipping trust and task")
         :ok
 
       _path ->
@@ -67,7 +57,7 @@ defmodule GitWork.Hooks do
         task = mise_task(root)
 
         with :ok <- maybe_trust_mise(trust_enabled, ctx),
-             :ok <- maybe_run_task(task, worktree_dir) do
+             :ok <- maybe_run_task(task, worktree_dir, Map.get(ctx, :automatic_task?, true)) do
           :ok
         end
     end
@@ -75,54 +65,155 @@ defmodule GitWork.Hooks do
 
   defp maybe_trust_mise(false, _ctx), do: :ok
 
-  # When source_worktree is nil (running from project root), use the project
-  # root itself as the trust source — it is the main branch's worktree.
-  defp maybe_trust_mise(true, %{source_worktree: nil, source_branch: nil, root: root, worktree_dir: worktree_dir}) do
-    trust_from_source(root, worktree_dir)
-  end
+  # Checkout owns trust provenance. A nil source means that no exact registered
+  # source worktree was established, so the hook must not infer one.
+  defp maybe_trust_mise(true, %{source_worktree: nil}), do: :ok
 
-  defp maybe_trust_mise(true, %{source_worktree: nil, source_branch: branch, root: root, worktree_dir: worktree_dir}) do
-    source = Path.join(root, branch)
-
-    if File.dir?(source) do
+  defp maybe_trust_mise(
+         true,
+         %{
+           source_worktree: source,
+           source_branch: branch,
+           worktree_dir: worktree_dir
+         }
+       )
+       when is_binary(source) and is_binary(branch) do
+    if File.dir?(source) and worktree_branch?(source, branch) do
       trust_from_source(source, worktree_dir)
     else
       :ok
     end
   end
 
-  defp maybe_trust_mise(true, %{source_worktree: source, worktree_dir: worktree_dir}) do
-    trust_from_source(source, worktree_dir)
+  defp maybe_trust_mise(true, _ctx), do: :ok
+
+  defp worktree_branch?(worktree, expected_branch) do
+    case Git.cmd(["branch", "--show-current"], cd: worktree) do
+      {:ok, ^expected_branch} -> true
+      _ -> false
+    end
   end
 
   defp trust_from_source(source, worktree_dir) do
-    case cmd("mise", ["trust", "--show"], cd: source) do
-      {:ok, output} ->
-        if String.contains?(output, "trusted") and not String.contains?(output, "untrusted") do
-          case cmd("mise", ["trust"], cd: worktree_dir) do
-            {:ok, _} -> :ok
-            {:error, msg} -> {:error, "mise trust failed: #{msg}"}
-          end
-        else
-          :ok
-        end
+    case trust_status(source) do
+      {:ok, :trusted} ->
+        trust_dir(worktree_dir)
+
+      {:ok, _status} ->
+        :ok
 
       {:error, msg} ->
         {:error, "mise trust --show failed: #{msg}"}
     end
   end
 
-  defp maybe_run_task(nil, _worktree_dir), do: :ok
+  # Pass the target directory explicitly. A no-argument `mise trust` can select
+  # an untrusted config from a parent directory instead of the new worktree.
+  defp trust_dir(worktree_dir) do
+    case cmd("mise", ["trust", worktree_dir], cd: worktree_dir) do
+      {:ok, _} -> :ok
+      {:error, msg} -> {:error, "mise trust failed: #{msg}"}
+    end
+  end
 
-  defp maybe_run_task(task, worktree_dir) do
-    if mise_task_exists?(task, worktree_dir) do
-      case cmd("mise", ["run", task], cd: worktree_dir) do
-        {:ok, _} -> :ok
-        {:error, msg} -> {:error, "mise run #{task} failed: #{msg}"}
+  defp trust_status(dir) do
+    case cmd("mise", ["trust", "--show"], cd: dir) do
+      {:ok, output} -> {:ok, trust_status_from_output(output, dir)}
+      {:error, msg} -> {:error, msg}
+    end
+  end
+
+  # `mise trust --show` may report several config roots (the current directory
+  # and parents). Only the status for this worktree is relevant; an unrelated
+  # untrusted parent must not make a trusted worktree appear untrusted.
+  defp trust_status_from_output(output, dir) do
+    expected = normalize_trust_path(dir, dir)
+
+    statuses =
+      output
+      |> String.split("\n", trim: true)
+      |> Enum.flat_map(fn line ->
+        case Regex.run(~r/^(.*):\s+(trusted|untrusted)\s*$/, String.trim(line)) do
+          [_, path, value] ->
+            normalized = normalize_trust_path(path, dir)
+
+            if trust_path_in_dir?(normalized, expected) do
+              [if(value == "trusted", do: :trusted, else: :untrusted)]
+            else
+              []
+            end
+
+          _ ->
+            []
+        end
+      end)
+
+    cond do
+      :untrusted in statuses -> :untrusted
+      :trusted in statuses -> :trusted
+      true -> legacy_trust_status(output)
+    end
+  end
+
+  defp trust_path_in_dir?(path, dir) do
+    path == dir or String.starts_with?(path, dir <> "/")
+  end
+
+  # Keep compatibility with older mise versions and the lightweight command
+  # wrappers used by consumers, which may print only `trusted` or `untrusted`.
+  defp legacy_trust_status(output) do
+    case String.trim(output) do
+      "trusted" -> :trusted
+      "untrusted" -> :untrusted
+      _ -> :unknown
+    end
+  end
+
+  defp normalize_trust_path(path, relative_to) do
+    path = String.trim(path)
+    home = System.get_env("HOME")
+
+    expanded =
+      cond do
+        path == "~" and is_binary(home) ->
+          home
+
+        String.starts_with?(path, "~/") and is_binary(home) ->
+          Path.join(home, String.trim_leading(path, "~/"))
+
+        true ->
+          path
       end
-    else
-      IO.write(:stderr, "hook: mise task #{task} not defined; skipping\n")
-      :ok
+
+    Path.expand(expanded, relative_to)
+  end
+
+  defp maybe_run_task(nil, _worktree_dir, _automatic_task?), do: :ok
+
+  defp maybe_run_task(_task, _worktree_dir, false) do
+    Output.notify(
+      :warning,
+      "hook: skipping automatic mise task for a remote-backed or explicitly based worktree; " <>
+        "review the target configuration before running it"
+    )
+
+    :ok
+  end
+
+  defp maybe_run_task(task, worktree_dir, true) do
+    case mise_task_exists?(task, worktree_dir) do
+      {:ok, true} ->
+        case cmd("mise", ["run", task], cd: worktree_dir) do
+          {:ok, _} -> :ok
+          {:error, msg} -> {:error, "mise run #{task} failed: #{msg}"}
+        end
+
+      {:ok, false} ->
+        Output.notify(:info, "hook: mise task #{task} not defined; skipping")
+        :ok
+
+      {:error, message} ->
+        {:error, "failed to inspect mise tasks: #{message}"}
     end
   end
 
@@ -132,17 +223,18 @@ defmodule GitWork.Hooks do
         try do
           case :json.decode(json) do
             tasks when is_list(tasks) ->
-              Enum.any?(tasks, fn t -> is_map(t) and t["name"] == task end)
+              {:ok, Enum.any?(tasks, fn t -> is_map(t) and t["name"] == task end)}
 
             _ ->
-              false
+              {:error, "mise returned a JSON value that is not a task list"}
           end
         rescue
-          _ -> false
+          exception ->
+            {:error, "mise returned malformed task JSON: #{Exception.message(exception)}"}
         end
 
-      {:error, _} ->
-        false
+      {:error, message} ->
+        {:error, "mise tasks --json failed: #{message}"}
     end
   end
 

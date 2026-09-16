@@ -135,6 +135,28 @@ defmodule GitWork.Commands.CheckoutTest do
     assert File.regular?(Path.join(path, "feature-remote.txt"))
   end
 
+  test "checkout from a preexisting local remote branch sets upstream tracking", %{tmp: tmp} do
+    origin = GitWork.TestHelper.create_origin_repo(tmp)
+    GitWork.TestHelper.create_remote_branch(origin, "feature-preexisting")
+
+    project = Path.join(tmp, "project")
+    {:ok, _} = GitWork.Commands.Clone.run([origin, project], :text)
+
+    {_, 0} =
+      System.cmd("git", ["config", "git-work.hooks.mise.task", ""],
+        cd: Path.join(project, ".bare")
+      )
+
+    File.cd!(Path.join(project, "main"))
+
+    assert {:ok, path} = Checkout.run(["feature-preexisting"], :text)
+
+    {upstream, 0} =
+      System.cmd("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], cd: path)
+
+    assert String.trim(upstream) == "origin/feature-preexisting"
+  end
+
   test "checkout without -b auto-creates worktree from remote branch", %{tmp: tmp} do
     origin = GitWork.TestHelper.create_origin_repo(tmp)
     project = Path.join(tmp, "project")
@@ -244,8 +266,12 @@ defmodule GitWork.Commands.CheckoutTest do
     {:ok, side_path} = Checkout.run(["-b", "side"], :text)
     File.write!(Path.join(side_path, "side.txt"), "side content")
     System.cmd("git", ["add", "."], cd: side_path)
-    System.cmd("git", ["-c", "user.name=Test", "-c", "user.email=test@test.com",
-      "commit", "-m", "side commit"], cd: side_path)
+
+    System.cmd(
+      "git",
+      ["-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-m", "side commit"],
+      cd: side_path
+    )
 
     # Create a child branch from "side" while sitting in a different worktree
     File.cd!(Path.join(project, "main"))
@@ -297,8 +323,12 @@ defmodule GitWork.Commands.CheckoutTest do
     {:ok, side_path} = Checkout.run(["-b", "side"], :text)
     File.write!(Path.join(side_path, "side.txt"), "side content")
     System.cmd("git", ["add", "."], cd: side_path)
-    System.cmd("git", ["-c", "user.name=Test", "-c", "user.email=test@test.com",
-      "commit", "-m", "side commit"], cd: side_path)
+
+    System.cmd(
+      "git",
+      ["-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-m", "side commit"],
+      cd: side_path
+    )
 
     # From inside the side worktree, create a new branch with no explicit base
     File.cd!(side_path)
@@ -392,9 +422,7 @@ defmodule GitWork.Commands.CheckoutTest do
 
     # Upstream tracking should be set to the remote branch
     {upstream, 0} =
-      System.cmd("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-        cd: path
-      )
+      System.cmd("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], cd: path)
 
     assert String.trim(upstream) == "origin/feature-tracking"
   end
@@ -423,9 +451,7 @@ defmodule GitWork.Commands.CheckoutTest do
 
     # New branch has no upstream yet (nothing on remote)
     {_, exit_code} =
-      System.cmd("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-        cd: path
-      )
+      System.cmd("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], cd: path)
 
     assert exit_code != 0
 
@@ -433,9 +459,7 @@ defmodule GitWork.Commands.CheckoutTest do
     {_, 0} = System.cmd("git", ["push"], cd: path)
 
     {upstream, 0} =
-      System.cmd("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-        cd: path
-      )
+      System.cmd("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], cd: path)
 
     assert String.trim(upstream) == "origin/feature-fresh"
   end

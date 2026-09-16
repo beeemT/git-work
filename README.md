@@ -126,6 +126,7 @@ $ gw --format=json list
 - Creates `<dir>/.bare` as a bare repository
 - Writes `<dir>/.git` pointer file (`gitdir: ./.bare`)
 - Adds an initial worktree for the HEAD branch
+- Creates missing parent directories and returns the physical worktree path, with symbolic links resolved
 
 Examples:
 
@@ -142,6 +143,9 @@ Converts a normal repo in place:
 2. Moves working files into `<root>/<current-branch>/`
 3. Creates worktree metadata/pointers
 4. Restores stashed uncommitted changes
+
+Before conversion, `gw init` rejects a target path that belongs to an existing worktree registration, even if its directory is missing.
+It leaves that registration and its index intact.
 
 If `gw init` is run again in an existing git-work root, it repairs workspace state (for example, rewriting `.git` pointer/config and recreating the HEAD worktree directory if missing).
 
@@ -180,6 +184,7 @@ Behavior:
 - Prompts for confirmation before deleting
 - `--yes` skips the confirmation prompt
 - Refuses to remove the HEAD branch unless `--force` is passed
+- Checks merge safety against the upstream branch, or `HEAD` if the upstream no longer exists
 - If run from inside the removed worktree, returns the HEAD worktree path so `gw` can move you safely
 
 Examples:
@@ -202,6 +207,7 @@ Behavior:
 - Runs `git fetch --all --prune`
 - Removes local worktrees whose tracking remote branch no longer exists
 - Never prunes HEAD branch
+- Refuses to prune branches not merged into the HEAD branch unless `--force` is set, including during `--dry-run`
 - `--dry-run` previews removals
 - `--force` force-removes stale worktrees/branches
 
@@ -253,6 +259,15 @@ mix test
 mix escript.build
 ./git_work --help
 ```
+
+## Releases
+
+Run the `release` workflow from the default branch with an existing version tag, such as `v1.2.3`.
+The workflow builds the tag commit, not a branch with the same name.
+It verifies that the tag commit belongs to the default branch before the build.
+
+Configure required reviewers for the `release` environment in repository settings.
+The build job has read-only repository access. The separate publish job requires environment approval when reviewers are configured.
 
 ## License
 

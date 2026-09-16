@@ -48,6 +48,87 @@ defmodule GitWork.Commands.RmTest do
     refute branches =~ "feature-rm-test"
   end
 
+  test "removes a merged branch when its upstream was pruned", %{tmp: tmp} do
+    origin = GitWork.TestHelper.create_origin_repo(tmp)
+    {_, 0} = System.cmd("git", ["branch", "feature-pruned", "main"], cd: origin)
+
+    project = Path.join(tmp, "project")
+    {:ok, _} = GitWork.Commands.Clone.run([origin, project], :text)
+    bare = Path.join(project, ".bare")
+
+    {_, 0} =
+      System.cmd("git", ["config", "git-work.hooks.mise.task", ""], cd: bare)
+
+    File.cd!(Path.join(project, "main"))
+    assert {:ok, _path} = Checkout.run(["feature-pruned"], :text)
+
+    GitWork.TestHelper.delete_remote_branch(origin, "feature-pruned")
+    {_, 0} = System.cmd("git", ["fetch", "--prune"], cd: bare)
+
+    assert {:ok, _} = Rm.run(["--yes", "feature-pruned"], :text)
+    refute File.dir?(Path.join(project, "feature-pruned"))
+    {branches, 0} = System.cmd("git", ["branch", "--list", "feature-pruned"], cd: bare)
+    refute branches =~ "feature-pruned"
+  end
+
+  test "uses an existing upstream when checking whether a branch is merged", %{tmp: tmp} do
+    origin = GitWork.TestHelper.create_origin_repo(tmp)
+    GitWork.TestHelper.create_remote_branch(origin, "feature-upstream")
+
+    project = Path.join(tmp, "project")
+    {:ok, _} = GitWork.Commands.Clone.run([origin, project], :text)
+    bare = Path.join(project, ".bare")
+
+    {_, 0} =
+      System.cmd("git", ["config", "git-work.hooks.mise.task", ""], cd: bare)
+
+    File.cd!(Path.join(project, "main"))
+    assert {:ok, _path} = Checkout.run(["feature-upstream"], :text)
+
+    assert {:ok, _} = Rm.run(["--yes", "feature-upstream"], :text)
+    refute File.dir?(Path.join(project, "feature-upstream"))
+  end
+
+  test "keeps an unmerged branch when its upstream was pruned", %{tmp: tmp} do
+    origin = GitWork.TestHelper.create_origin_repo(tmp)
+    {_, 0} = System.cmd("git", ["branch", "feature-pruned", "main"], cd: origin)
+
+    project = Path.join(tmp, "project")
+    {:ok, _} = GitWork.Commands.Clone.run([origin, project], :text)
+    bare = Path.join(project, ".bare")
+
+    {_, 0} =
+      System.cmd("git", ["config", "git-work.hooks.mise.task", ""], cd: bare)
+
+    File.cd!(Path.join(project, "main"))
+    assert {:ok, feature_path} = Checkout.run(["feature-pruned"], :text)
+
+    File.write!(Path.join(feature_path, "unmerged.txt"), "unmerged\n")
+    {_, 0} = System.cmd("git", ["add", "unmerged.txt"], cd: feature_path)
+
+    {_, 0} =
+      System.cmd(
+        "git",
+        [
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@test.com",
+          "commit",
+          "-m",
+          "unmerged feature"
+        ],
+        cd: feature_path
+      )
+
+    GitWork.TestHelper.delete_remote_branch(origin, "feature-pruned")
+    {_, 0} = System.cmd("git", ["fetch", "--prune"], cd: bare)
+
+    assert {:error, msg} = Rm.run(["--yes", "feature-pruned"], :text)
+    assert msg =~ "not fully merged"
+    assert File.dir?(feature_path)
+  end
+
   test "refuses to remove HEAD branch without --force", %{tmp: tmp} do
     project = GitWork.TestHelper.create_gw_project(tmp)
 

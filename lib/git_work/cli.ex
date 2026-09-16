@@ -24,26 +24,26 @@ defmodule GitWork.CLI do
 
     case args do
       ["--help"] ->
-        print_help()
+        print_help(format)
 
       ["-h"] ->
-        print_help()
+        print_help(format)
 
       ["help"] ->
-        print_help()
+        print_help(format)
 
       ["help", command] ->
-        print_command_help(command)
+        print_command_help(command, format)
 
       [command | rest] ->
         if "--help" in rest or "-h" in rest do
-          print_command_help(command)
+          print_command_help(command, format)
         else
           dispatch(command, rest, format)
         end
 
       [] ->
-        print_help()
+        print_help(format)
     end
   end
 
@@ -61,73 +61,91 @@ defmodule GitWork.CLI do
     case Map.get(@commands, command) do
       nil ->
         GitWork.Output.print_error("unknown command '#{command}'", format)
-        print_help()
+
+        if format == :text do
+          print_help(format)
+        end
+
         System.halt(1)
 
       module ->
-        result =
-          try do
-            module.run(args, format)
-          rescue
-            e ->
-              {:error, "unexpected error: #{Exception.message(e)}"}
-          end
+        {result, messages} =
+          GitWork.Output.with_context(format, fn ->
+            try do
+              module.run(args, format)
+            rescue
+              e ->
+                {:error, "unexpected error: #{Exception.message(e)}"}
+            end
+          end)
 
-        handle_result(result, format)
+        handle_result(result, format, messages)
     end
   end
 
-  defp handle_result({:ok, %GitWork.Output{} = output}, format) do
-    GitWork.Output.print(output, format)
+  defp handle_result({:ok, %GitWork.Output{} = output}, format, messages) do
+    GitWork.Output.print(GitWork.Output.with_messages(output, messages), format)
   end
 
-  defp handle_result({:ok, output}, format) when is_binary(output) and output != "" do
-    case format do
-      :json ->
-        json = JSON.encode!(%{path: output, messages: []})
-        IO.write(:stderr, json <> "\n")
-
-      :text ->
-        IO.puts(output)
-    end
+  defp handle_result({:ok, output}, :json, messages) when is_binary(output) do
+    output = if output == "", do: GitWork.Output.empty(), else: GitWork.Output.path(output)
+    GitWork.Output.print(GitWork.Output.with_messages(output, messages), :json)
   end
 
-  defp handle_result({:ok, _}, _format), do: :ok
+  defp handle_result({:ok, output}, :text, _messages)
+       when is_binary(output) and output != "" do
+    IO.puts(output)
+  end
 
-  defp handle_result({:error, message}, format) do
-    GitWork.Output.print_error(message, format)
+  defp handle_result({:ok, _output}, :text, _messages), do: :ok
+
+  defp handle_result({:ok, _output}, :json, messages) do
+    GitWork.Output.print(GitWork.Output.with_messages(GitWork.Output.empty(), messages), :json)
+  end
+
+  defp handle_result({:error, message}, format, messages) do
+    GitWork.Output.print_error(message, format, messages)
     System.halt(1)
   end
 
-  defp print_command_help(command) do
+  defp print_command_help(command, format) do
     case Map.get(@commands, command) do
       nil ->
-        IO.write(:stderr, "git-work: unknown command '#{command}'\n")
+        GitWork.Output.print_error("unknown command '#{command}'", format)
         System.halt(1)
 
       module ->
-        IO.write(:stderr, module.help())
+        render_help(module.help(), format)
     end
   end
 
-  defp print_help do
-    IO.write(:stderr, """
-    usage: git-work [--format=json] <command> [<args>]
+  defp print_help(format) do
+    render_help(
+      """
+      usage: git-work [--format=json] <command> [<args>]
 
-    Commands:
-      activate <shell>       Print shell integration (bash, zsh, fish)
-      clone (cl) <url> [<dir>]    Clone a repo into worktree-based layout
-      init [--force]              Convert current repo to worktree-based layout
-      checkout (co) <branch>      Switch to branch worktree (fuzzy match supported)
-      rm [--force] [--yes] <branch>  Remove a worktree and its branch
-      sync (s) [--dry-run]        Fetch and prune stale worktrees
-      list (ls)                   List all worktrees
+      Commands:
+        activate <shell>       Print shell integration (bash, zsh, fish)
+        clone (cl) <url> [<dir>]    Clone a repo into worktree-based layout
+        init [--force]              Convert current repo to worktree-based layout
+        checkout (co) <branch>      Switch to branch worktree (fuzzy match supported)
+        rm [--force] [--yes] <branch>  Remove a worktree and its branch
+        sync (s) [--dry-run]        Fetch and prune stale worktrees
+        list (ls)                   List all worktrees
 
-    Global options:
-      --format=json    Output results as JSON to stderr
-      --help           Show this help
+      Global options:
+        --format=json    Output results as JSON to stderr
+        --help           Show this help
 
-    Run 'git-work <command> --help' for more information on a specific command.
-    """)
+      Run 'git-work <command> --help' for more information on a specific command.
+      """,
+      format
+    )
+  end
+
+  defp render_help(help, :text), do: IO.write(:stderr, help)
+
+  defp render_help(help, :json) do
+    GitWork.Output.print(GitWork.Output.data(%{help: help}), :json)
   end
 end

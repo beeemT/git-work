@@ -4,7 +4,7 @@ defmodule GitWork.Commands.Activate do
   Pipe the output into your shell's eval/source mechanism.
   """
 
-  alias GitWork.ShellHook
+  alias GitWork.{Output, ShellHook}
 
   def help do
     shells = Enum.join(ShellHook.supported_shells(), ", ")
@@ -22,6 +22,13 @@ defmodule GitWork.Commands.Activate do
       # fish (in config.fish)
       git-work activate fish | source
     """
+  end
+
+  def run([shell], :json) do
+    case ShellHook.generate(shell) do
+      {:error, _} = err -> err
+      code when is_binary(code) -> {:ok, Output.data(%{shell: code})}
+    end
   end
 
   def run([shell], _format) do

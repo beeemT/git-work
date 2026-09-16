@@ -3,7 +3,9 @@ defmodule GitWork.Commands.List do
   List all worktrees in a formatted table.
   """
 
-  alias GitWork.{Git, Project}
+  alias GitWork.{Git, Output, Project}
+
+  @usage "usage: git-work list"
 
   def help do
     """
@@ -19,22 +21,27 @@ defmodule GitWork.Commands.List do
     """
   end
 
-  def run(_args, format) do
+  def run([], format) do
     with {:ok, root} <- Project.find_root() do
       bare_dir = Project.bare_path(root)
 
-      case Git.cmd(["worktree", "list", "--porcelain"], cd: bare_dir) do
+      case Git.cmd(["worktree", "list", "--porcelain", "-z"], cd: bare_dir) do
         {:ok, output} ->
           entries =
             output
             |> parse_porcelain(root)
-            |> Enum.reject(fn e -> String.starts_with?(e.dir, ".") end)
+            |> Enum.reject(fn entry -> String.starts_with?(entry.dir, ".") end)
 
-          output_result = output_for_list(entries, File.cwd!())
+          current_path = current_worktree_path(entries, File.cwd!())
+          output_result = output_for_list(entries, current_path)
 
           case format do
-            :json -> {:ok, output_result}
-            :text -> GitWork.Output.print(output_result, :text); {:ok, ""}
+            :json ->
+              {:ok, output_result}
+
+            :text ->
+              Output.notify(:info, format_table(entries, current_path))
+              {:ok, ""}
           end
 
         {:error, msg} ->
@@ -43,66 +50,133 @@ defmodule GitWork.Commands.List do
     end
   end
 
-  defp output_for_list(entries, cwd) do
+  def run(_args, _format), do: {:error, @usage}
+
+  defp output_for_list(entries, current_path) do
     %GitWork.Output{
       data: %{
-        worktrees: Enum.map(entries, fn e ->
-          %{
-            dir: e.dir,
-            branch: e.branch,
-            current: e.path == cwd
-          }
-        end)
+        worktrees:
+          Enum.map(entries, fn entry ->
+            %{
+              dir: entry.dir,
+              branch: entry.branch,
+              current: entry.path == current_path
+            }
+          end)
       },
-      messages: [%{level: :info, text: format_table(entries, cwd)}]
+      messages: []
     }
   end
 
   @doc false
   def parse_porcelain(output, project_root) do
+    entries =
+      if :binary.match(output, <<0>>) == :nomatch do
+        parse_line_porcelain(output)
+      else
+        parse_nul_porcelain(output)
+      end
+
+    root = Path.expand(project_root)
+
+    entries
+    |> Enum.reject(& &1.bare)
+    |> Enum.flat_map(fn
+      %{path: path} = entry when is_binary(path) ->
+        absolute_path = Path.expand(path)
+        dir_name = Path.relative_to(absolute_path, root)
+        [%{entry | path: absolute_path, dir: dir_name}]
+
+      _entry ->
+        []
+    end)
+  end
+
+  defp parse_nul_porcelain(output) do
+    {entries, current} =
+      output
+      |> :binary.split(<<0>>, [:global])
+      |> Enum.reduce({[], nil}, fn field, {entries, current} ->
+        case field do
+          <<"worktree ", path::binary>> ->
+            {add_entry(entries, current), new_entry(path)}
+
+          "bare" when not is_nil(current) ->
+            {entries, %{current | bare: true}}
+
+          <<"branch refs/heads/", branch::binary>> when not is_nil(current) ->
+            {entries, %{current | branch: branch}}
+
+          _other ->
+            {entries, current}
+        end
+      end)
+
+    entries
+    |> add_entry(current)
+    |> Enum.reverse()
+  end
+
+  defp parse_line_porcelain(output) do
     output
     |> String.split("\n\n", trim: true)
-    |> Enum.map(&parse_entry/1)
-    |> Enum.reject(fn entry -> entry.bare end)
-    |> Enum.map(fn entry ->
-      dir_name = Path.relative_to(entry.path, project_root)
-      %{entry | dir: dir_name}
+    |> Enum.map(fn block ->
+      block
+      |> String.split("\n", trim: true)
+      |> Enum.reduce(new_entry(nil), fn line, entry ->
+        case line do
+          <<"worktree ", path::binary>> ->
+            %{entry | path: path}
+
+          "bare" ->
+            %{entry | bare: true}
+
+          <<"branch refs/heads/", branch::binary>> ->
+            %{entry | branch: branch}
+
+          _other ->
+            entry
+        end
+      end)
     end)
   end
 
-  defp parse_entry(block) do
-    lines = String.split(block, "\n", trim: true)
+  defp new_entry(path), do: %{path: path, branch: nil, bare: false, dir: nil}
 
-    Enum.reduce(lines, %{path: nil, branch: nil, bare: false, dir: nil}, fn line, acc ->
-      cond do
-        String.starts_with?(line, "worktree ") ->
-          %{acc | path: String.trim_leading(line, "worktree ")}
+  defp add_entry(entries, %{path: path} = entry) when is_binary(path), do: [entry | entries]
+  defp add_entry(entries, _entry), do: entries
 
-        line == "bare" ->
-          %{acc | bare: true}
+  defp current_worktree_path(entries, cwd) do
+    cwd = Path.expand(cwd)
 
-        String.starts_with?(line, "branch ") ->
-          ref = String.trim_leading(line, "branch ")
-          branch = String.replace_prefix(ref, "refs/heads/", "")
-          %{acc | branch: branch}
-
-        true ->
-          acc
-      end
-    end)
+    entries
+    |> Enum.filter(&path_contains?(&1.path, cwd))
+    |> Enum.max_by(&String.length(&1.path), fn -> nil end)
+    |> case do
+      nil -> nil
+      entry -> entry.path
+    end
   end
 
-  defp format_table([], _cwd), do: "  (no worktrees)\n"
+  defp path_contains?(worktree_path, candidate_path) do
+    relative = Path.relative_to(Path.expand(candidate_path), Path.expand(worktree_path))
 
-  defp format_table(entries, cwd) do
+    relative == "." or
+      (Path.type(relative) == :relative and relative != ".." and
+         not String.starts_with?(relative, "../"))
+  end
+
+  defp format_table([], _current_path), do: "  (no worktrees)\n"
+
+  defp format_table(entries, current_path) do
     max_dir =
       entries
-      |> Enum.map(fn e -> String.length(e.dir) end)
+      |> Enum.map(fn entry -> String.length(entry.dir) end)
       |> Enum.max()
 
     entries
     |> Enum.map(fn entry ->
-      marker = if entry.path == cwd, do: "*", else: " "
+      marker = if entry.path == current_path, do: "*", else: " "
       padded_dir = String.pad_trailing(entry.dir, max_dir)
       branch_label = entry.branch || "(detached)"
       "#{marker} #{padded_dir}  #{branch_label}\n"

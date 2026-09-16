@@ -32,6 +32,10 @@ defmodule GitWork.Commands.SyncTest do
     # Go back to main before deleting
     File.cd!(Path.join(project, "main"))
 
+    # Merge the branch locally so normal sync can prune it safely.
+    {_, 0} =
+      System.cmd("git", ["merge", "--ff-only", "feature-stale"], cd: Path.join(project, "main"))
+
     # Delete the branch on remote
     GitWork.TestHelper.delete_remote_branch(origin, "feature-stale")
 
@@ -53,6 +57,10 @@ defmodule GitWork.Commands.SyncTest do
     {:ok, _} = Checkout.run(["-b", "feature-dry"], :text)
     File.cd!(Path.join(project, "main"))
 
+    # Merge the branch locally so normal sync can prune it safely.
+    {_, 0} =
+      System.cmd("git", ["merge", "--ff-only", "feature-dry"], cd: Path.join(project, "main"))
+
     GitWork.TestHelper.delete_remote_branch(origin, "feature-dry")
 
     # Dry run
@@ -60,6 +68,29 @@ defmodule GitWork.Commands.SyncTest do
 
     # Worktree should still exist
     assert File.dir?(Path.join(project, "feature-dry"))
+  end
+
+  test "refuses to prune a stale unmerged worktree", %{tmp: tmp} do
+    project = GitWork.TestHelper.create_gw_project(tmp)
+    origin = Path.join(tmp, "origin.git")
+
+    GitWork.TestHelper.create_remote_branch(origin, "feature-unmerged")
+    System.cmd("git", ["fetch", "--all"], cd: Path.join(project, ".bare"))
+
+    File.cd!(Path.join(project, "main"))
+    {:ok, _} = Checkout.run(["-b", "feature-unmerged"], :text)
+    File.cd!(Path.join(project, "main"))
+
+    GitWork.TestHelper.delete_remote_branch(origin, "feature-unmerged")
+
+    assert {:error, message} = Sync.run([], :text)
+    assert message =~ "refusing to prune unmerged branches"
+    assert File.dir?(Path.join(project, "feature-unmerged"))
+
+    {branches, 0} =
+      System.cmd("git", ["branch", "--format=%(refname:short)"], cd: Path.join(project, ".bare"))
+
+    assert "feature-unmerged" in String.split(branches, "\n", trim: true)
   end
 
   test "never prunes HEAD branch", %{tmp: tmp} do

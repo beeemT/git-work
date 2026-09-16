@@ -35,6 +35,45 @@ defmodule GitWork.ProjectTest do
     end
   end
 
+  describe "configure_bare/1" do
+    setup do
+      tmp =
+        Path.join(
+          System.tmp_dir!(),
+          "gw_configure_bare_test_#{System.unique_integer([:positive])}"
+        )
+
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf!(tmp) end)
+      {:ok, tmp: tmp}
+    end
+
+    test "preserves multiple fetch mappings and remains idempotent", %{tmp: tmp} do
+      bare = GitWork.TestHelper.create_origin_repo(tmp)
+      custom_heads = "+refs/heads/release:refs/remotes/upstream/release"
+      custom_tags = "+refs/tags/*:refs/tags/*"
+      standard_heads = "+refs/heads/*:refs/remotes/upstream/*"
+
+      {_, 0} = System.cmd("git", ["config", "remote.upstream.url", bare], cd: bare)
+      {_, 0} = System.cmd("git", ["config", "remote.upstream.fetch", custom_heads], cd: bare)
+
+      {_, 0} =
+        System.cmd("git", ["config", "--add", "remote.upstream.fetch", custom_tags], cd: bare)
+
+      assert :ok = Project.configure_bare(bare)
+      assert :ok = Project.configure_bare(bare)
+
+      {fetches, 0} =
+        System.cmd("git", ["config", "--get-all", "remote.upstream.fetch"], cd: bare)
+
+      assert String.split(fetches, "\n", trim: true) == [
+               custom_heads,
+               custom_tags,
+               standard_heads
+             ]
+    end
+  end
+
   describe "find_root/1" do
     setup do
       tmp = Path.join(System.tmp_dir!(), "gw_project_test_#{System.unique_integer([:positive])}")
@@ -68,15 +107,24 @@ defmodule GitWork.ProjectTest do
       {:ok, tmp: tmp}
     end
 
-    test "lists non-hidden directories", %{tmp: tmp} do
-      File.mkdir_p!(Path.join(tmp, ".bare"))
-      File.mkdir_p!(Path.join(tmp, "main"))
-      File.mkdir_p!(Path.join(tmp, "feature-login"))
-      File.write!(Path.join(tmp, ".git"), "gitdir: ./.bare\n")
+    test "lists registered direct-child worktrees", %{tmp: tmp} do
+      project = GitWork.TestHelper.create_gw_project(tmp)
+      feature_path = Path.join(project, "feature-login")
 
-      dirs = Project.worktree_dirs(tmp)
+      {_, 0} =
+        System.cmd("git", ["branch", "feature/login", "main"], cd: Path.join(project, ".bare"))
+
+      {_, 0} =
+        System.cmd("git", ["worktree", "add", feature_path, "feature/login"],
+          cd: Path.join(project, ".bare")
+        )
+
+      File.mkdir_p!(Path.join(project, "unregistered"))
+
+      dirs = Project.worktree_dirs(project)
       assert "main" in dirs
       assert "feature-login" in dirs
+      refute "unregistered" in dirs
       refute ".bare" in dirs
       refute ".git" in dirs
     end

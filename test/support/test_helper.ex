@@ -59,7 +59,8 @@ defmodule GitWork.TestHelper do
     origin = create_origin_repo(base_dir)
     project = Path.join(base_dir, "project")
 
-    {:ok, _main_path} = GitWork.Commands.Clone.run([origin, project], :text)
+    {:ok, main_path} = GitWork.Commands.Clone.run([origin, project], :text)
+    project = Path.dirname(main_path)
 
     # Disable mise hook by default for tests unless explicitly enabled
     bare = Path.join(project, ".bare")
@@ -161,6 +162,7 @@ defmodule GitWork.TestHelper do
     current = System.get_env("PATH") || ""
     System.put_env("PATH", base_dir <> ":" <> current)
   end
+
   @doc """
   Write a fake mise script that simulates a trusted or untrusted source.
   `trusted?` controls what `mise trust --show` reports.
@@ -203,5 +205,4 @@ defmodule GitWork.TestHelper do
 
     File.chmod!(script, 0o755)
   end
-
 end

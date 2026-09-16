@@ -19,6 +19,82 @@ defmodule GitWork.Output do
 
   defstruct [:path, :data, messages: []]
 
+  @format_key {__MODULE__, :format}
+  @messages_key {__MODULE__, :messages}
+
+  @doc """
+  Execute a command with an output context.
+
+  Text notifications are written immediately to stderr. JSON notifications are
+  collected and returned with the command result so the CLI can emit one
+  structured document.
+  """
+  def with_context(format, fun) when format in [:text, :json] and is_function(fun, 0) do
+    previous_format = Process.get(@format_key, :unset)
+    previous_messages = Process.get(@messages_key, :unset)
+
+    Process.put(@format_key, format)
+    Process.put(@messages_key, [])
+
+    try do
+      {fun.(), Process.get(@messages_key, [])}
+    after
+      restore_context(@format_key, previous_format)
+      restore_context(@messages_key, previous_messages)
+    end
+  end
+
+  @doc """
+  Add a user-facing notification.
+
+  Notifications are collected for JSON command execution and printed to stderr
+  for text execution. Direct command calls default to text behavior.
+  """
+  def notify(level, text)
+      when level in [:info, :warning, :error] and is_binary(text) do
+    message = %{level: level, text: text}
+
+    if Process.get(@format_key) == :json do
+      messages = Process.get(@messages_key, [])
+      Process.put(@messages_key, messages ++ [message])
+    else
+      write_message(message)
+    end
+
+    :ok
+  end
+
+  @doc """
+  Return whether the active command context is JSON output.
+  """
+  def json?, do: Process.get(@format_key) == :json
+
+  @doc """
+  Read a confirmation response without emitting a second JSON stream.
+  """
+  def confirm(prompt) when is_binary(prompt) do
+    if json?() do
+      {:error, "confirmation is required; rerun with --yes when using --format=json"}
+    else
+      IO.write(:stderr, prompt)
+
+      case IO.gets("") do
+        input when is_binary(input) ->
+          case String.trim(input) |> String.downcase() do
+            "y" -> :ok
+            "yes" -> :ok
+            _other -> {:error, "aborted"}
+          end
+
+        _other ->
+          {:error, "aborted"}
+      end
+    end
+  end
+
+  defp restore_context(key, :unset), do: Process.delete(key)
+  defp restore_context(key, value), do: Process.put(key, value)
+
   @doc """
   Create a new output with a path result.
 
@@ -40,6 +116,14 @@ defmodule GitWork.Output do
   """
   def empty do
     %__MODULE__{}
+  end
+
+  @doc """
+  Prepend notifications collected by the CLI to an output value.
+  """
+  def with_messages(%__MODULE__{messages: existing} = output, messages)
+      when is_list(messages) do
+    %{output | messages: messages ++ existing}
   end
 
   @doc """
@@ -89,13 +173,13 @@ defmodule GitWork.Output do
 
   def print(%__MODULE__{path: nil, data: nil, messages: messages}, :text) do
     Enum.each(messages, fn msg ->
-      IO.write(:stderr, format_message(msg))
+      write_message(msg)
     end)
   end
 
   def print(%__MODULE__{path: path, data: nil, messages: messages}, :text) when is_binary(path) do
     Enum.each(messages, fn msg ->
-      IO.write(:stderr, format_message(msg))
+      write_message(msg)
     end)
 
     IO.puts(path)
@@ -103,7 +187,7 @@ defmodule GitWork.Output do
 
   def print(%__MODULE__{path: nil, data: data, messages: messages}, :text) when is_map(data) do
     Enum.each(messages, fn msg ->
-      IO.write(:stderr, format_message(msg))
+      write_message(msg)
     end)
 
     # For text format, data commands just print their messages
@@ -139,6 +223,12 @@ defmodule GitWork.Output do
     %{level: level, text: text}
   end
 
+  defp write_message(message) do
+    text = format_message(message)
+    suffix = if String.ends_with?(text, "\n"), do: "", else: "\n"
+    IO.write(:stderr, text <> suffix)
+  end
+
   defp format_message(%{level: :info, text: text}), do: text
   defp format_message(%{level: :warning, text: text}), do: "warning: #{text}"
   defp format_message(%{level: :error, text: text}), do: "error: #{text}"
@@ -154,15 +244,19 @@ defmodule GitWork.Output do
   @doc """
   Print an error in the specified format.
   """
-  def print_error(message, :text) when is_binary(message) do
+  def print_error(message, format), do: print_error(message, format, [])
+
+  def print_error(message, :text, _messages) when is_binary(message) do
     IO.write(:stderr, "git-work: #{message}\n")
   end
 
-  def print_error(message, :json) when is_binary(message) do
+  def print_error(message, :json, messages) when is_binary(message) and is_list(messages) do
+    error_message = %{level: :error, text: message}
+
     json =
       JSON.encode!(%{
         error: message,
-        messages: [%{level: :error, text: message}]
+        messages: Enum.map(messages ++ [error_message], &message_to_json/1)
       })
 
     IO.write(:stderr, json <> "\n")
