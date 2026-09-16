@@ -264,16 +264,21 @@ defmodule GitWork.Commands.Rm do
                  target,
                  "common Git directory"
                ),
-             {:ok, actual_branch} <-
-               git_identity(
-                 ["symbolic-ref", "--quiet", "--short", "HEAD"],
-                 expected_path,
-                 target,
-                 "checked-out branch"
-               ),
+             {:ok, actual_branch} <- current_branch_identity(expected_path, target),
              :ok <- ensure_same_branch(actual_branch, target) do
           ensure_branch_ref_exists(bare_dir, target.branch)
         end
+    end
+  end
+
+  defp current_branch_identity(path, target) do
+    case Git.current_branch(path) do
+      {:ok, branch} ->
+        {:ok, branch}
+
+      {:error, msg} ->
+        {:error,
+         "could not verify checked-out branch for branch '#{target.branch}' at '#{target.path}': #{msg}"}
     end
   end
 
@@ -652,7 +657,7 @@ defmodule GitWork.Commands.Rm do
   defp delete_branch(transaction) do
     flag = if transaction.force?, do: "-D", else: "-d"
 
-    case Git.cmd(["branch", flag, transaction.target.branch], cd: transaction.bare_dir) do
+    case Git.cmd(["branch", flag, "--", transaction.target.branch], cd: transaction.bare_dir) do
       {:ok, _output} ->
         removal_success(transaction)
 

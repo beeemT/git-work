@@ -2,6 +2,7 @@ defmodule GitWork.ProjectTest do
   use ExUnit.Case, async: true
 
   alias GitWork.Project
+  alias GitWork.Git
 
   describe "sanitize_branch/1" do
     test "replaces / with -" do
@@ -32,6 +33,28 @@ defmodule GitWork.ProjectTest do
 
     test "extracts name from URL without .git" do
       assert Project.dir_from_url("https://github.com/org/repo") == "repo"
+    end
+  end
+
+  describe "Git.current_branch/1" do
+    setup do
+      tmp =
+        Path.join(
+          System.tmp_dir!(),
+          "gw_current_branch_test_#{System.unique_integer([:positive])}"
+        )
+
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf!(tmp) end)
+      {:ok, tmp: tmp}
+    end
+
+    test "returns the full branch name when it contains a ref-like prefix", %{tmp: tmp} do
+      repo = GitWork.TestHelper.create_normal_repo(tmp)
+
+      {_, 0} = System.cmd("git", ["branch", "-m", "main", "heads/main"], cd: repo)
+
+      assert Git.current_branch(repo) == {:ok, "heads/main"}
     end
   end
 

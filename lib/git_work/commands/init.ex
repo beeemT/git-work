@@ -1767,8 +1767,8 @@ defmodule GitWork.Commands.Init do
   end
 
   defp current_branch(dir) do
-    case Git.cmd(["symbolic-ref", "--quiet", "--short", "HEAD"], cd: dir) do
-      {:ok, branch} when branch != "" ->
+    case Git.current_branch(dir) do
+      {:ok, branch} ->
         {:ok, branch}
 
       {:error, _message} ->

@@ -25,6 +25,25 @@ defmodule GitWork.Git do
   end
 
   @doc """
+  Return the branch checked out at `directory`.
+
+  Git's short symbolic-ref form is ambiguous when a branch name overlaps a
+  ref namespace, so this accepts only the full `refs/heads/<branch>` form.
+  """
+  def current_branch(directory) do
+    case cmd(["symbolic-ref", "--quiet", "HEAD"], cd: directory) do
+      {:ok, "refs/heads/" <> branch} when branch != "" ->
+        {:ok, branch}
+
+      {:ok, ref} ->
+        {:error, "unexpected HEAD reference: #{ref}"}
+
+      {:error, message} ->
+        {:error, message}
+    end
+  end
+
+  @doc """
   Run a git command. Raises on failure.
   """
   def cmd!(args, opts \\ []) do

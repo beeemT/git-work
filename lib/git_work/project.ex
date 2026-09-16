@@ -326,7 +326,7 @@ defmodule GitWork.Project do
   Determine the HEAD branch of the bare repo (usually main or master).
   """
   def head_branch(project_root) do
-    case GitWork.Git.cmd(["symbolic-ref", "--short", "HEAD"], cd: bare_path(project_root)) do
+    case Git.current_branch(bare_path(project_root)) do
       {:ok, branch} -> {:ok, branch}
       {:error, _} -> {:error, "could not determine HEAD branch"}
     end
@@ -401,7 +401,7 @@ defmodule GitWork.Project do
   branches and ambiguous remote matches are never guessed.
   """
   def ensure_upstream(worktree_dir, branch) do
-    case Git.cmd(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    case Git.cmd(["rev-parse", "--symbolic-full-name", "@{u}"],
            cd: worktree_dir
          ) do
       {:ok, _} ->
@@ -413,7 +413,7 @@ defmodule GitWork.Project do
             :ok
 
           {:ok, [{remote, remote_branch}]} ->
-            upstream = "#{remote}/#{remote_branch}"
+            upstream = "refs/remotes/#{remote}/#{remote_branch}"
 
             case Git.cmd(
                    ["branch", "--set-upstream-to=#{upstream}", "--", branch],
@@ -442,26 +442,29 @@ defmodule GitWork.Project do
   end
 
   defp matching_remote_refs(worktree_dir, branch) do
-    with {:ok, output} <-
-           Git.cmd(["for-each-ref", "--format=%(refname)", "refs/remotes"], cd: worktree_dir) do
-      matches =
-        output
+    with {:ok, remote_output} <- Git.cmd(["remote"], cd: worktree_dir),
+         {:ok, ref_output} <-
+           Git.cmd(["for-each-ref", "--format=%(refname)", "refs/remotes"],
+             cd: worktree_dir
+           ) do
+      refs =
+        ref_output
         |> String.split("\n", trim: true)
-        |> Enum.flat_map(fn
-          "refs/remotes/" <> rest ->
-            case String.split(rest, "/", parts: 2) do
-              [remote, remote_branch] when remote_branch == branch ->
-                if remote_branch == "HEAD", do: [], else: [{remote, remote_branch}]
+        |> MapSet.new()
 
-              _ ->
-                []
-            end
-
-          _ ->
-            []
-        end)
-        |> Enum.uniq()
+      matches =
+        remote_output
+        |> String.split("\n", trim: true)
         |> Enum.sort()
+        |> Enum.flat_map(fn remote ->
+          full_ref = "refs/remotes/#{remote}/#{branch}"
+
+          if branch != "HEAD" and MapSet.member?(refs, full_ref) do
+            [{remote, branch}]
+          else
+            []
+          end
+        end)
 
       {:ok, matches}
     else

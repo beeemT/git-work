@@ -300,28 +300,31 @@ defmodule GitWork.Commands.Clone do
   end
 
   defp detect_head_branch(bare_dir) do
-    head =
-      case Git.cmd(["symbolic-ref", "--short", "HEAD"], cd: bare_dir) do
-        {:ok, branch} -> branch
-        {:error, _message} -> nil
-      end
+    case Git.current_branch(bare_dir) do
+      {:ok, branch} ->
+        if branch_exists?(bare_dir, branch) do
+          {:ok, branch}
+        else
+          first_available_branch(bare_dir)
+        end
 
-    if head && branch_exists?(bare_dir, head) do
-      {:ok, head}
-    else
-      first_available_branch(bare_dir)
+      {:error, _message} ->
+        first_available_branch(bare_dir)
     end
   end
 
   defp first_available_branch(bare_dir) do
-    case Git.cmd(["branch", "--list", "--format=%(refname:short)"], cd: bare_dir) do
+    case Git.cmd(["for-each-ref", "--format=%(refname)", "refs/heads"], cd: bare_dir) do
       {:ok, output} ->
-        case String.split(output, "\n", trim: true) do
-          [] ->
-            {:error, "empty or unborn remotes are unsupported"}
-
-          [branch | _rest] ->
+        case Enum.find_value(String.split(output, "\n", trim: true), fn
+               "refs/heads/" <> branch when branch != "" -> {:ok, branch}
+               _other -> nil
+             end) do
+          {:ok, branch} ->
             {:ok, branch}
+
+          nil ->
+            {:error, "empty or unborn remotes are unsupported"}
         end
 
       {:error, message} ->
@@ -578,7 +581,7 @@ defmodule GitWork.Commands.Clone do
   end
 
   defp validate_worktree_branch(worktree_dir, branch) do
-    case Git.cmd(["symbolic-ref", "--short", "HEAD"], cd: worktree_dir) do
+    case Git.current_branch(worktree_dir) do
       {:ok, ^branch} ->
         :ok
 
@@ -646,16 +649,17 @@ defmodule GitWork.Commands.Clone do
   end
 
   defp validate_upstream(worktree_dir, branch) do
-    case Git.cmd(
-           ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-           cd: worktree_dir
-         ) do
-      {:ok, "origin/" <> ^branch} ->
+    expected_upstream = "refs/remotes/origin/#{branch}"
+
+    case Git.cmd(["rev-parse", "--symbolic-full-name", "@{u}"], cd: worktree_dir) do
+      {:ok, ^expected_upstream} ->
         :ok
 
       {:ok, upstream} ->
+        upstream_name = String.replace_prefix(upstream, "refs/remotes/", "")
+
         {:error,
-         "clone verification failed: worktree upstream is #{upstream}, expected origin/#{branch}"}
+         "clone verification failed: worktree upstream is #{upstream_name}, expected origin/#{branch}"}
 
       {:error, message} ->
         {:error, "clone verification failed: worktree upstream is not configured: #{message}"}

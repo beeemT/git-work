@@ -93,6 +93,58 @@ defmodule GitWork.Commands.SyncTest do
     assert "feature-unmerged" in String.split(branches, "\n", trim: true)
   end
 
+  test "keeps HEAD worktree when its remote and a same-name tag are gone", %{tmp: tmp} do
+    project = GitWork.TestHelper.create_gw_project(tmp)
+    bare = Path.join(project, ".bare")
+    origin = Path.join(tmp, "origin.git")
+
+    GitWork.TestHelper.create_remote_branch(origin, "feature-stale")
+    System.cmd("git", ["fetch", "--all"], cd: bare)
+
+    File.cd!(Path.join(project, "main"))
+    {:ok, feature_path} = Checkout.run(["feature-stale"], :text)
+    File.cd!(Path.join(project, "main"))
+
+    {_, 0} =
+      System.cmd("git", ["merge", "--ff-only", "feature-stale"], cd: Path.join(project, "main"))
+
+    {main_oid, 0} = System.cmd("git", ["rev-parse", "refs/heads/main^{commit}"], cd: bare)
+    main_readme = File.read!(Path.join(project, "main/README.md"))
+    main_feature_file = File.read!(Path.join(project, "main/feature-stale.txt"))
+
+    {_, 0} = System.cmd("git", ["tag", "main", "refs/heads/main"], cd: bare)
+
+    GitWork.TestHelper.delete_remote_branch(origin, "feature-stale")
+    GitWork.TestHelper.delete_remote_branch(origin, "main")
+
+    File.cd!(project)
+    assert {:ok, _} = Sync.run(["--dry-run"], :text)
+    assert File.dir?(Path.join(project, "main"))
+    assert File.dir?(feature_path)
+
+    assert {:ok, _} = Sync.run(["--force"], :text)
+    assert File.dir?(Path.join(project, "main"))
+    refute File.dir?(feature_path)
+
+    {_, stale_branch_status} =
+      System.cmd(
+        "git",
+        ["show-ref", "--verify", "--quiet", "refs/heads/feature-stale"],
+        cd: bare
+      )
+
+    assert stale_branch_status != 0
+
+    {remaining_oid, 0} =
+      System.cmd("git", ["rev-parse", "refs/heads/main^{commit}"], cd: bare)
+
+    assert String.trim(remaining_oid) == String.trim(main_oid)
+    assert File.read!(Path.join(project, "main/README.md")) == main_readme
+    assert File.read!(Path.join(project, "main/feature-stale.txt")) == main_feature_file
+
+    {_, 0} = System.cmd("git", ["show-ref", "--verify", "--quiet", "refs/tags/main"], cd: bare)
+  end
+
   test "never prunes HEAD branch", %{tmp: tmp} do
     project = GitWork.TestHelper.create_gw_project(tmp)
 

@@ -53,6 +53,56 @@ defmodule GitWork.Commands.CloneTest do
     assert upstream =~ "origin/main"
   end
 
+  test "clone keeps the default branch when a tag has the same name", %{tmp: tmp} do
+    source = Path.join(tmp, "source")
+    File.mkdir_p!(source)
+
+    assert {_, 0} = System.cmd("git", ["init", "-b", "main", source], cd: tmp)
+    File.write!(Path.join(source, "README.md"), "main content\n")
+    assert {_, 0} = System.cmd("git", ["add", "README.md"], cd: source)
+
+    assert {_, 0} =
+             System.cmd(
+               "git",
+               ["-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-m", "main"],
+               cd: source
+             )
+
+    assert {_, 0} = System.cmd("git", ["checkout", "-b", "a"], cd: source)
+    File.write!(Path.join(source, "README.md"), "earlier branch content\n")
+    assert {_, 0} = System.cmd("git", ["add", "README.md"], cd: source)
+
+    assert {_, 0} =
+             System.cmd(
+               "git",
+               [
+                 "-c",
+                 "user.name=Test",
+                 "-c",
+                 "user.email=test@test.com",
+                 "commit",
+                 "-m",
+                 "earlier branch"
+               ],
+               cd: source
+             )
+
+    assert {_, 0} = System.cmd("git", ["checkout", "main"], cd: source)
+    assert {_, 0} = System.cmd("git", ["tag", "main"], cd: source)
+    assert {_, 0} = System.cmd("git", ["tag", "origin/main"], cd: source)
+
+    origin = Path.join(tmp, "origin.git")
+    assert {_, 0} = System.cmd("git", ["clone", "--bare", source, origin], cd: tmp)
+
+    project = Path.join(tmp, "project")
+    assert {:ok, main_path} = Clone.run([origin, project], :text)
+    assert main_path == Path.join(project, "main")
+    assert File.read!(Path.join(main_path, "README.md")) == "main content\n"
+
+    {head, 0} = System.cmd("git", ["symbolic-ref", "HEAD"], cd: Path.join(project, ".bare"))
+    assert String.trim(head) == "refs/heads/main"
+  end
+
   test "clone creates missing nested destination parents", %{tmp: tmp} do
     origin = GitWork.TestHelper.create_origin_repo(tmp)
     project = Path.join([tmp, "nested", "parents", "project"])

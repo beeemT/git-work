@@ -129,17 +129,98 @@ defmodule GitWork.Commands.RmTest do
     assert File.dir?(feature_path)
   end
 
-  test "refuses to remove HEAD branch without --force", %{tmp: tmp} do
+  test "removes non-HEAD branch when a same-name tag exists", %{tmp: tmp} do
     project = GitWork.TestHelper.create_gw_project(tmp)
+    bare = Path.join(project, ".bare")
 
+    File.cd!(Path.join(project, "main"))
+    {:ok, _} = Checkout.run(["-b", "collision"], :text)
+    File.cd!(Path.join(project, "main"))
+
+    {branch_oid, 0} =
+      System.cmd("git", ["rev-parse", "refs/heads/collision^{commit}"], cd: bare)
+
+    {_, 0} = System.cmd("git", ["tag", "collision", "refs/heads/collision"], cd: bare)
+
+    assert {:ok, _} = Rm.run(["--yes", "collision"], :text)
+    refute File.dir?(Path.join(project, "collision"))
+
+    {_, branch_status} =
+      System.cmd("git", ["show-ref", "--verify", "--quiet", "refs/heads/collision"], cd: bare)
+
+    assert branch_status != 0
+
+    {tag_oid, 0} =
+      System.cmd("git", ["rev-parse", "refs/tags/collision^{commit}"], cd: bare)
+
+    assert String.trim(tag_oid) == String.trim(branch_oid)
+  end
+
+  test "force-removes an unmerged collision branch while retaining its tag", %{tmp: tmp} do
+    project = GitWork.TestHelper.create_gw_project(tmp)
+    bare = Path.join(project, ".bare")
+
+    File.cd!(Path.join(project, "main"))
+    {:ok, collision_path} = Checkout.run(["-b", "collision-force"], :text)
+    File.write!(Path.join(collision_path, "unmerged.txt"), "unmerged\n")
+    {_, 0} = System.cmd("git", ["add", "unmerged.txt"], cd: collision_path)
+
+    {_, 0} =
+      System.cmd(
+        "git",
+        [
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@test.com",
+          "commit",
+          "-m",
+          "unmerged collision"
+        ],
+        cd: collision_path
+      )
+
+    File.cd!(Path.join(project, "main"))
+
+    {branch_oid, 0} =
+      System.cmd("git", ["rev-parse", "refs/heads/collision-force^{commit}"], cd: bare)
+
+    {_, 0} =
+      System.cmd("git", ["tag", "collision-force", "refs/heads/collision-force"], cd: bare)
+
+    assert {:ok, _} = Rm.run(["--yes", "--force", "collision-force"], :text)
+    refute File.dir?(collision_path)
+
+    {_, branch_status} =
+      System.cmd(
+        "git",
+        ["show-ref", "--verify", "--quiet", "refs/heads/collision-force"],
+        cd: bare
+      )
+
+    assert branch_status != 0
+
+    {tag_oid, 0} =
+      System.cmd("git", ["rev-parse", "refs/tags/collision-force^{commit}"], cd: bare)
+
+    assert String.trim(tag_oid) == String.trim(branch_oid)
+  end
+
+  test "refuses to remove HEAD branch when a same-name tag exists without --force", %{tmp: tmp} do
+    project = GitWork.TestHelper.create_gw_project(tmp)
+    bare = Path.join(project, ".bare")
+
+    {_, 0} = System.cmd("git", ["tag", "main", "refs/heads/main"], cd: bare)
     File.cd!(Path.join(project, "main"))
 
     assert {:error, msg} = Rm.run(["main"], :text)
     assert msg =~ "refusing"
     assert msg =~ "force"
 
-    # main should still exist
     assert File.dir?(Path.join(project, "main"))
+
+    {_, 0} = System.cmd("git", ["show-ref", "--verify", "--quiet", "refs/heads/main"], cd: bare)
+    {_, 0} = System.cmd("git", ["show-ref", "--verify", "--quiet", "refs/tags/main"], cd: bare)
   end
 
   test "rm from inside worktree returns main path", %{tmp: tmp} do

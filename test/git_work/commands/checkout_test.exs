@@ -135,26 +135,79 @@ defmodule GitWork.Commands.CheckoutTest do
     assert File.regular?(Path.join(path, "feature-remote.txt"))
   end
 
-  test "checkout from a preexisting local remote branch sets upstream tracking", %{tmp: tmp} do
+  test "checkout from a preexisting local branch tracks a slash-named renamed remote", %{
+    tmp: tmp
+  } do
     origin = GitWork.TestHelper.create_origin_repo(tmp)
-    GitWork.TestHelper.create_remote_branch(origin, "feature-preexisting")
+
+    {_, 0} =
+      System.cmd("git", ["branch", "feature/preexisting", "main"], cd: origin)
 
     project = Path.join(tmp, "project")
     {:ok, _} = GitWork.Commands.Clone.run([origin, project], :text)
+    bare = Path.join(project, ".bare")
 
     {_, 0} =
-      System.cmd("git", ["config", "git-work.hooks.mise.task", ""],
-        cd: Path.join(project, ".bare")
+      System.cmd(
+        "git",
+        [
+          "update-ref",
+          "refs/heads/feature/preexisting",
+          "refs/remotes/origin/feature/preexisting"
+        ],
+        cd: bare
       )
+
+    {_, 0} = System.cmd("git", ["remote", "rename", "origin", "team/upstream"], cd: bare)
+
+    {_, 0} =
+      System.cmd("git", ["config", "git-work.hooks.mise.task", ""], cd: bare)
 
     File.cd!(Path.join(project, "main"))
 
-    assert {:ok, path} = Checkout.run(["feature-preexisting"], :text)
+    assert {:ok, path} = Checkout.run(["feature/preexisting"], :text)
 
     {upstream, 0} =
-      System.cmd("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], cd: path)
+      System.cmd("git", ["rev-parse", "--symbolic-full-name", "@{u}"], cd: path)
 
-    assert String.trim(upstream) == "origin/feature-preexisting"
+    assert String.trim(upstream) ==
+             "refs/remotes/team/upstream/feature/preexisting"
+  end
+
+  test "checkout refuses ambiguous matches across slash-named remotes", %{tmp: tmp} do
+    origin = GitWork.TestHelper.create_origin_repo(tmp)
+
+    {_, 0} =
+      System.cmd("git", ["branch", "feature/preexisting", "main"], cd: origin)
+
+    project = Path.join(tmp, "project")
+    {:ok, _} = GitWork.Commands.Clone.run([origin, project], :text)
+    bare = Path.join(project, ".bare")
+
+    {_, 0} =
+      System.cmd(
+        "git",
+        [
+          "update-ref",
+          "refs/heads/feature/preexisting",
+          "refs/remotes/origin/feature/preexisting"
+        ],
+        cd: bare
+      )
+
+    {_, 0} = System.cmd("git", ["remote", "rename", "origin", "team/upstream"], cd: bare)
+    {_, 0} = System.cmd("git", ["remote", "add", "team/other", origin], cd: bare)
+    {_, 0} = System.cmd("git", ["fetch", "team/other"], cd: bare)
+
+    {_, 0} =
+      System.cmd("git", ["config", "git-work.hooks.mise.task", ""], cd: bare)
+
+    File.cd!(Path.join(project, "main"))
+
+    assert {:error, message} = Checkout.run(["feature/preexisting"], :text)
+    assert message =~ "cannot choose an upstream"
+    assert message =~ "team/other/feature/preexisting"
+    assert message =~ "team/upstream/feature/preexisting"
   end
 
   test "checkout without -b auto-creates worktree from remote branch", %{tmp: tmp} do

@@ -53,6 +53,21 @@ defmodule GitWork.Commands.InitTest do
     assert log =~ "initial"
   end
 
+  test "init keeps the branch name when a tag has the same name", %{tmp: tmp} do
+    repo = GitWork.TestHelper.create_normal_repo(tmp)
+    assert {_, 0} = System.cmd("git", ["tag", "main"], cd: repo)
+
+    File.cd!(repo)
+
+    assert {:ok, main_path} = Init.run([], :text)
+    assert main_path == Path.join(repo, "main")
+    assert File.read!(Path.join(main_path, "README.md")) == "# Test\n"
+    assert File.read!(Path.join(main_path, "src.ex")) == "defmodule Test, do: nil\n"
+
+    {tracked, 0} = System.cmd("git", ["ls-files"], cd: main_path)
+    assert String.trim(tracked) == "README.md\nsrc.ex"
+  end
+
   test "aborts if already initialized", %{tmp: tmp} do
     repo = GitWork.TestHelper.create_normal_repo(tmp)
 
